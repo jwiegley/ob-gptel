@@ -152,6 +152,9 @@ This function sends the BODY text to GPTel and returns the response."
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
+         (vars (ob-gptel--vars-alist params))
+         ;; Expand vars in body early
+         (body (ob-gptel--expand-vars-in-string body vars))
          (fsm
           (ob-gptel--with-preset (and preset (intern-soft preset))
             (let ((gptel-model
@@ -200,12 +203,20 @@ This function sends the BODY text to GPTel and returns the response."
                 :transforms (list #'gptel--transform-apply-preset
                                   (ob-gptel--add-context context))
                 :system
-                (cond (prompt
-                       (with-current-buffer buffer
-                         (ob-gptel-find-prompt prompt system-message)))
-                      (session
-                       (with-current-buffer buffer
-                         (ob-gptel-find-session session system-message))))
+                (let ((sys
+                       (cond (prompt
+                              (with-current-buffer buffer
+                                (ob-gptel-find-prompt prompt system-message)))
+                             (session
+                              (with-current-buffer buffer
+                                (ob-gptel-find-session session system-message)))
+                             (t system-message))))
+                  (cond
+                   ((and (listp sys) sys)
+                    (ob-gptel--expand-vars-in-directives sys vars))
+                   ((stringp sys)
+                    (ob-gptel--expand-vars-in-string sys vars))
+                   (t sys)))
                 :dry-run dry-run
                 :stream nil)))))
     (if dry-run
@@ -233,6 +244,45 @@ GPTel blocks don't use sessions, so this is a no-op."
              (car pair)
              (ob-gptel-var-to-gptel (cdr pair))))
    (org-babel--get-vars params)))
+
+;; Variable expansion utilities
+;; Expand :var variables into the request body and directive strings.
+(defun ob-gptel--stringify-var (value)
+  "Convert VALUE to a user-facing string for prompt injection."
+  (cond
+   ((stringp value) value)
+   (t (format "%S" value))))
+
+(defun ob-gptel--vars-alist (params)
+  "Return alist of variables from PARAMS as provided by Org-babel."
+  (org-babel--get-vars params))
+
+(defun ob-gptel--expand-vars-in-string (text vars)
+  "Expand $name and ${name} placeholders in TEXT using VARS alist.
+VARS keys are symbols; values are injected as strings. Unknown names are left intact."
+  (when (and text (stringp text))
+    (replace-regexp-in-string
+     "\\$\\({\\([A-Za-z_][A-Za-z0-9_-]*\\)}\\|\\([A-Za-z_][A-Za-z0-9_-]*\\)\\)"
+     (lambda (match)
+       ;; Avoid match-string to prevent buffer-substring advice issues; parse from MATCH directly
+       (let* ((raw (if (and (> (length match) 2)
+                            (eq (aref match 1) ?{)
+                            (eq (aref match (1- (length match))) ?}))
+                       (substring match 2 -1)   ; ${name} -> name
+                     (substring match 1)))       ; $name -> name
+              (sym (ignore-errors (intern raw)))
+              (cell (and sym (assoc sym vars))))
+         (if cell (ob-gptel--stringify-var (cdr cell)) match)))
+     text t t)))
+
+(defun ob-gptel--expand-vars-in-directives (directives vars)
+  "Map variable expansion across DIRECTIVES list."
+  (when directives
+    (mapcar (lambda (d)
+              (if (stringp d)
+                  (ob-gptel--expand-vars-in-string d vars)
+                d))
+            directives)))
 
 ;;; This function courtesy Karthik Chikmagalur <karthik.chikmagalur@gmail.com>
 (defun ob-gptel-capf ()
