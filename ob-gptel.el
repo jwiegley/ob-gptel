@@ -23,8 +23,10 @@
 ;; turn), :session (id linking earlier blocks as prior turns), :format
 ;; (\"org\" or \"markdown\"), :dry-run (inspect payload), and :entry
 ;; (when t, prepend the prose preceding the block in its enclosing org
-;; entry to the body — handy for \"summarize the above\" style queries).
-
+;; entry to the body — handy for \"summarize the above\" style queries).;; Tool use example:
+;;   #+begin_src gptel :tools "search_web read_url"
+;;   What are the latest Emacs features?
+;;   #+end_src
 ;;; Code:
 
 (require 'ob)
@@ -61,8 +63,8 @@
     (:prompt . nil)
     (:session . nil)
     (:entry . nil)
-    (:format . "org"))
-  "Default header arguments for gptel source blocks.")
+    (:format . "org")
+    (:tools . nil))  "Default header arguments for gptel source blocks.")
 
 (defun ob-gptel-find-prompt (prompt &optional system-message)
   "Given a PROMPT identifier, find the block/result pair it names.
@@ -301,6 +303,7 @@ This function sends the BODY text to GPTel and returns the response."
          (result-params (cdr (assoc :result-params params)))
          (block-start (copy-marker (nth 5 (org-babel-get-src-block-info 'light))
                                    t))
+         (tools-param (cdr (assoc :tools params)))
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (entry (and entry (not (member entry '("no" "nil" "false")))))
@@ -343,9 +346,16 @@ This function sends the BODY text to GPTel and returns the response."
                          (if backend
                              (setq-local gptel-backend backend)
                            gptel-backend))
-                     gptel-backend)))
-              (setq resolved-model gptel-model)
-              (gptel-request
+                     gptel-backend))
+                  (gptel-tools
+                   (when tools-param
+                     (mapcar (lambda (tool-name)
+                               (or (gptel-get-tool tool-name)
+                                   (error "Tool %s not found" tool-name)))
+                             (if (stringp tools-param)
+                                 (split-string tools-param)
+                               tools-param)))))
+              (setq resolved-model gptel-model)              (gptel-request
                   effective-body
                 :callback
                 (ob-gptel--make-callback
@@ -424,7 +434,8 @@ GPTel blocks don't use sessions, so this is a no-op."
                           ("prompt"  . "Include result of other block")
                           ("context" . "List of files to include")
                           ("entry"   . "Include preceding entry text")
-                          ("format"  . "Output format: markdown or org"))))
+                          ("format"  . "Output format: markdown or org")
+                          ("tools"   . "List of tool names to use"))))
               (list start end (all-completions word args)
                     :annotation-function #'(lambda (c) (cdr-safe (assoc c args)))
                     :exclusive 'no))
@@ -450,11 +461,18 @@ GPTel blocks don't use sessions, so this is a no-op."
                                                        (plist-get :description)))))
                          ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
                          ("entry" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
-                         ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format"))))))
+                         ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format")))
+                         ("tools" (cons (and (boundp 'gptel--known-tools)
+                                             (mapcar #'car gptel--known-tools))
+                                        (lambda (t-name)
+                                          (and (boundp 'gptel--known-tools)
+                                               (when-let ((tool (alist-get
+                                                                 (intern t-name)
+                                                                 gptel--known-tools)))
+                                                 (gptel-tool-description tool)))))))))
             (list start end (all-completions word (car comp-and-annotation))
                   :exclusive 'no
                   :annotation-function (cdr comp-and-annotation))))))))
-
 (add-to-list 'org-src-lang-modes '("gptel" . text))
 
 (provide 'ob-gptel)
