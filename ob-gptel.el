@@ -16,6 +16,11 @@
 ;;   #+begin_src gptel :model gpt-4 :temperature 0.7
 ;;   What is the capital of France?
 ;;   #+end_src
+;;
+;; Tool use example:
+;;   #+begin_src gptel :tools "search_web read_url"
+;;   What are the latest Emacs features?
+;;   #+end_src
 
 ;;; Code:
 
@@ -35,7 +40,8 @@
     (:context . nil)
     (:prompt . nil)
     (:session . nil)
-    (:format . "org"))
+    (:format . "org")
+    (:tools . nil))
   "Default header arguments for gptel source blocks.")
 
 (defun ob-gptel-find-prompt (prompt &optional system-message)
@@ -149,33 +155,42 @@ This function sends the BODY text to GPTel and returns the response."
          (context (cdr (assoc :context params)))
          (format (cdr (assoc :format params)))
          (dry-run (cdr (assoc :dry-run params)))
+         (tools-param (cdr (assoc :tools params)))
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
          (fsm
-          (ob-gptel--with-preset (and preset (intern-soft preset))
-            (let ((gptel-model
-                   (if model
-                       (if (symbolp model) model (intern model))
-                     gptel-model))
-                  (gptel-temperature
-                   (if (and temperature (stringp temperature))
-                       (string-to-number temperature)
-                     gptel-temperature))
-                  (gptel-max-tokens
-                   (if (and max-tokens (stringp max-tokens))
-                       (string-to-number max-tokens)
-                     gptel-max-tokens))
-                  (gptel--system-message
-                   (or system-message
-                       gptel--system-message))
-                  (gptel-backend
-                   (if backend-name
-                       (let ((backend (gptel-get-backend backend-name)))
-                         (if backend
-                             (setq-local gptel-backend backend)
-                           gptel-backend))
-                     gptel-backend)))
+           (ob-gptel--with-preset (and preset (intern-soft preset))
+             (let ((gptel-model
+                    (if model
+                        (if (symbolp model) model (intern model))
+                      gptel-model))
+                   (gptel-temperature
+                    (if (and temperature (stringp temperature))
+                        (string-to-number temperature)
+                      gptel-temperature))
+                   (gptel-max-tokens
+                    (if (and max-tokens (stringp max-tokens))
+                        (string-to-number max-tokens)
+                      gptel-max-tokens))
+                   (gptel--system-message
+                    (or system-message
+                        gptel--system-message))
+                   (gptel-backend
+                    (if backend-name
+                        (let ((backend (gptel-get-backend backend-name)))
+                          (if backend
+                              (setq-local gptel-backend backend)
+                            gptel-backend))
+                      gptel-backend))
+                   (gptel-tools
+                    (when tools-param
+                      (mapcar (lambda (tool-name)
+                                (or (gptel-get-tool tool-name)
+                                    (error "Tool %s not found" tool-name)))
+                              (if (stringp tools-param)
+                                  (split-string tools-param)
+                                tools-param)))))
               (gptel-request
                   body
                 :callback
@@ -244,43 +259,52 @@ GPTel blocks don't use sessions, so this is a no-op."
                    (word (buffer-substring-no-properties ;word being completed
                           (progn (skip-syntax-backward "_w") (setq start (point))) end))
                    (header-arg-p (eq (char-before) ?:))) ;completing a :header-arg?
-        (if header-arg-p
-            (let ((args '(("backend" . "The gptel backend to use")
-                          ("model"   . "The model to use")
-                          ("preset"  . "Use gptel preset")
-                          ("dry-run" . "Don't send, instead return payload?")
-                          ("system"  . "System message for request")
-                          ("prompt"  . "Include result of other block")
-                          ("context" . "List of files to include")
-                          ("format"  . "Output format: markdown or org"))))
-              (list start end (all-completions word args)
-                    :annotation-function #'(lambda (c) (cdr-safe (assoc c args)))
-                    :exclusive 'no))
-          ;; Completing the value of a header-arg
-          (when-let* ((key (and (re-search-backward ;capture header-arg being completed
-                                 ":\\([^ \t]+?\\) +" (line-beginning-position) t)
-                                (match-string 1)))
-                      (comp-and-annotation
-                       (pcase key ;generate completion table and annotation function for key
-                         ("backend" (list gptel--known-backends))
-                         ("model"
-                          (cons (gptel-backend-models
-                                 (save-excursion ;find backend being used, or
-                                   (forward-line 0)
-                                   (if (re-search-forward
-                                        ":backend +\\([^ \t]+\\)" (line-end-position) t)
-                                       (gptel-get-backend (match-string 1))
-                                     gptel-backend))) ;fall back to buffer backend
-                                (lambda (m) (get (intern m) :description))))
-                         ("preset" (cons gptel--known-presets
-                                         (lambda (p) (thread-first
-                                                  (cdr (assq (intern p) gptel--known-presets))
-                                                  (plist-get :description)))))
-                         ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
-                         ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format"))))))
-            (list start end (all-completions word (car comp-and-annotation))
-                  :exclusive 'no
-                  :annotation-function (cdr comp-and-annotation))))))))
+         (if header-arg-p
+             (let ((args '(("backend" . "The gptel backend to use")
+                           ("model"   . "The model to use")
+                           ("preset"  . "Use gptel preset")
+                           ("dry-run" . "Don't send, instead return payload?")
+                           ("system"  . "System message for request")
+                           ("prompt"  . "Include result of other block")
+                           ("context" . "List of files to include")
+                           ("format"  . "Output format: markdown or org")
+                           ("tools"   . "List of tool names to use"))))
+               (list start end (all-completions word args)
+                     :annotation-function #'(lambda (c) (cdr-safe (assoc c args)))
+                     :exclusive 'no))
+           ;; Completing the value of a header-arg
+           (when-let* ((key (and (re-search-backward ;capture header-arg being completed
+                                  ":\\([^ \t]+?\\) +" (line-beginning-position) t)
+                                 (match-string 1)))
+                       (comp-and-annotation
+                        (pcase key ;generate completion table and annotation function for key
+                          ("backend" (list gptel--known-backends))
+                          ("model"
+                           (cons (gptel-backend-models
+                                  (save-excursion ;find backend being used, or
+                                    (forward-line 0)
+                                    (if (re-search-forward
+                                         ":backend +\\([^ \t]+\\)" (line-end-position) t)
+                                        (gptel-get-backend (match-string 1))
+                                      gptel-backend))) ;fall back to buffer backend
+                                 (lambda (m) (get (intern m) :description))))
+                          ("preset" (cons gptel--known-presets
+                                          (lambda (p) (thread-first
+                                                   (cdr (assq (intern p) gptel--known-presets))
+                                                   (plist-get :description)))))
+                          ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
+                          ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format")))
+                          ("tools" (cons (and (boundp 'gptel--known-tools)
+                                              (mapcar #'car gptel--known-tools))
+                                         (lambda (t-name)
+                                           (and (boundp 'gptel--known-tools)
+                                                (when-let ((tool (alist-get
+                                                                  (intern t-name)
+                                                                  gptel--known-tools)))
+                                                  (gptel-tool-description tool)))))))))
+             (list start end (all-completions word (car comp-and-annotation))
+                   :exclusive 'no
+                   :annotation-function (cdr comp-and-annotation))))))))
 
 (with-eval-after-load 'org-src
   (add-to-list 'org-src-lang-modes '("gptel" . text)))

@@ -13,6 +13,7 @@ for documentation, exploration, and interactive workflows.
   - Execute AI queries as Org source blocks
   - Full control over gptel parameters (model, temperature, etc.)
   - Support for system messages and conversation contexts
+  - Tool use support - enable LLMs to call functions and access external data
   - Dry-run mode to inspect API calls without sending them
   - Integration with Org's export and tangling features
   - Reusable prompts through named blocks
@@ -165,10 +166,27 @@ What would this request look like?
 | =:session=     | nil        | Session name of blocks to use as conversation base   |
 | =:preset=      | nil        | Name of preset to use                                |
 | =:format=      | "markdown" | Output format: "markdown" or "org"                   |
+| =:tools=       | nil        | Space-separated list of tool names to enable         |
 | =:results=     | "replace"  | How to handle results (standard Org babel)           |
 | =:exports=     | "both"     | What to export (standard Org babel)                  |
 
 ** Advanced Usage
+
+*** Using Tools
+
+ob-gptel supports gptel's tool-use capabilities, allowing LLMs to call functions and access external data. Tools must first be defined in gptel (see [[https://github.com/karthink/gptel#tool-use][gptel's tool documentation]]).
+
+Example with web search tools:
+
+#+begin_src org
+,#+begin_src gptel :tools "search_web read_url"
+What are the latest developments in Emacs 30?
+,#+end_src
+#+end_src
+
+The =:tools= parameter accepts:
+- A space-separated string of tool names: ="tool1 tool2 tool3"=
+- A list of tool names: =(tool1 tool2 tool3)=
 
 *** Multiple Backends
 
@@ -250,12 +268,21 @@ find /tmp -type f -links +1
 4. /Templates/: Create template functions that generate gptel blocks with
    predefined parameters.
 
+5. /Tool Use/: Define frequently-used tools in your Emacs configuration and
+   reference them by name in blocks. Tool confirmation behavior is controlled
+   by gptel's =gptel-confirm-tool-calls= variable.
+
 * Troubleshooting
 
 - Ensure gptel is properly configured and working before using ob-gptel
 - Check that your API keys are set up correctly in gptel
 - Use =:dry-run yes= to debug request formatting
 - Verify that =gptel= is in =org-babel-load-languages=
+- For tool-related issues:
+  - Verify tools are defined: =(mapcar #'car gptel--known-tools)=
+  - Check that your backend/model supports tool use
+  - Use =:dry-run yes= to inspect the tool definitions being sent
+  - Ensure tool names match exactly (case-sensitive)
 
 * Contributing
 
