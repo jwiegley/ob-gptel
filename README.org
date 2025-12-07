@@ -237,17 +237,10 @@ find /tmp -type f -links +1
 1. /Export Integration/: Use =:exports code=, =:exports results=, or =:exports both=
    to control what appears in exported documents.
 
-2. /Variables/: You can pass variables to your prompts:
-   #+begin_src org
-   ,#+begin_src gptel :var topic="Emacs"
-   Tell me about $topic
-   ,#+end_src
-   #+end_src
-
-3. /Caching/: Add =:cache yes= to avoid re-running expensive queries during
+2. /Caching/: Add =:cache yes= to avoid re-running expensive queries during
    export.
 
-4. /Templates/: Create template functions that generate gptel blocks with
+3. /Templates/: Create template functions that generate gptel blocks with
    predefined parameters.
 
 * Troubleshooting
@@ -264,3 +257,171 @@ Contributions are welcome! Please submit issues and pull requests on GitHub.
 * License
 
 This package is released under the same license as Emacs (GPL v3 or later).
+
+* my debugging
+
+** session and system per file headers
+
+these don't work because of how babel parameters are collected
+
+#+begin_src org
+#+property: header-args:gptel+ :system "system prompt"
+#+property: header-args:gptel+ :session test
+#+end_src
+
+** system-messages
+
+#+begin_src emacs-lisp
+(setq gptel--system-message 
+  "You are a large language model living in Emacs and a helpful assistant. Respond concisely.")
+
+(setq gptel--system-message nil)
+#+end_src
+
+#+name: math-context
+#+begin_src gptel :system "You are a mathematics tutor."
+What is the Pythagorean theorem?
+#+end_src
+
+#+RESULTS: math-context
+: The Pythagorean theorem states that in a right triangle, the square of the
+: length of the hypotenuse (c) equals the sum of squares of the other two sides
+: (a and b). Mathematically: a² + b² = c²
+
+#+begin_src gptel :prompt math-context :dry-run t :wrap src elisp
+Can you give me an example calculation?
+#+end_src
+
+#+RESULTS:
+#+begin_src elisp
+(:model "gpt-4o-mini" :messages
+        [(:role "user" :content "What is the Pythagorean theorem?")
+         (:role "assistant" :content
+                "The Pythagorean theorem states that in a right triangle, the square of the\nlength of the hypotenuse (c) equals the sum of squares of the other two sides\n(a and b). Mathematically: a² + b² = c²")
+         (:role "user" :content "Can you give me an example calculation?")]
+        :stream :json-false :temperature 1.0)
+#+end_src
+
+
+#+begin_src gptel :system "You are a creative writing assistant." :wrap src elisp :dry-run t
+Help me start a short story about a time traveler.
+#+end_src
+
+#+RESULTS:
+#+begin_src elisp
+(:model "gpt-4o-mini" :messages
+        [(:role "system" :content "You are a creative writing assistant.")
+         (:role "user" :content
+                "Help me start a short story about a time traveler.")]
+        :stream :json-false :temperature 1.0)
+#+end_src
+
+#+begin_src gptel :system "You are a creative writing assistant." :session foo
+Help me start a short story about a time traveler.
+#+end_src
+
+#+RESULTS:
+: In the year 2157, Dr. Elena Vasquez made a discovery that would either save
+: humanity or destroy the fabric of time itself. Her temporal displacement
+: device hummed quietly in the corner of her lab...
+
+** presets
+
+#+begin_src emacs-lisp
+(gptel-make-preset 'test
+  :description "Preset for org mode"
+  :backend "ChatGPT"
+  :system "You are a large language model living in Emacs and a helpful assistant. Respond concisely."
+  :model 'gpt-5
+  :context '("test.txt")
+  )
+#+end_src
+
+
+#+begin_src gptel :session foo :preset test :dry-run t :wrap src elisp
+Continue the story with an unexpected twist.
+#+end_src
+
+#+RESULTS:
+#+begin_src elisp
+(:model "gpt-5" :messages
+        [(:role "system" :content
+                "You are a large language model living in Emacs and a helpful assistant. Respond concisely.")
+         (:role "user" :content
+                "Help me start a short story about a time traveler.")
+         (:role "assistant" :content
+                "In the year 2157, Dr. Elena Vasquez made a discovery that would either save\nhumanity or destroy the fabric of time itself. Her temporal displacement\ndevice hummed quietly in the corner of her lab...")
+         (:role "user" :content
+                "Request context:\n\nIn file `test.txt`:\n\n```\nhello there\n\n```\n\nContinue the story with an unexpected twist.")]
+        :stream :json-false)
+#+end_src
+
+** context
+
+#+begin_src emacs-lisp
+(append gptel-context (split-string "test.png"))
+(setq gptel-use-context 'user)
+(setq gptel-context '("./test.png" "./test.svg"))
+(setq gptel-context '("test.org"))
+(gptel--model-capable-p 'media)
+(gptel-context--collect-media)
+(gptel-context--string (gptel-context--collect))
+(setq gptel-track-media t)
+#+end_src
+
+#+begin_src gptel :dry-run t :wrap src elisp :media t :context test.txt
+[[file:test.png]]
+
+describe this image
+#+end_src
+
+#+RESULTS:
+#+begin_src elisp
+(:model "gpt-4o-mini" :messages
+        [(:role "user" :content
+                [(:type "text" :text
+                        "Request context:\n\nIn file `test.txt`:\n\n```\nhello there\n\n```")
+                 (:type "image_url" :image_url
+                        (:url
+                         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAC5UlEQVR4AaxXA4xdQRSd2u7MfNe24qS2bRtR7b5ujFpR46SI2Ua1bdu2ufckn7Mz7739fya57e7gnPuul/ldTZo0KRkUontAiC0BzveT3JRCfIbgZ+zhDHdwl9laNTkPEPA2yflHkv8+5SPe4G3WxHXr1i1FIHkkXwCajeAtMICVzVefAIgNAZZva0SEaE7+fIyHNgWYwPb+cpXcshLgcPP5CeXBNZKdtP8mC8L39HY3yVnVHdqYQLCoIEEpp+GsQ4cOxaWUk6QQz7EfT79LBH6Q5AD9fJH2P8QJ3tLenEQqUloOUnHBVdD0mmgPBALtMmoB5+Vpr7HjOEWZsv7//18kHA7Xj8ViVdL3SfFauuzIcAVyVmfGYDDYhuW4QqFQTIcNzmSFMxUZMt/YXBUgi/U0FStwM5ROUxEhC9TIVQFySzXCeq3jADfMv8WgwEJmaVFQTjRwbMHhft1hJBKpZ62f1KxZWccBbihwU2d+RDWzuAjzoUaBmww5rVHgHrO8iOyUygNuaPZVY55PthXAR6k84NaYJi5SCosxUJp4fmgUeAAFThpSZIwlfrdUP8GCnG8wROgpW4FIRHt0HOBWm4Wq4XwLwTfBhA9u1qBBgwoIOsOlf+hcbdq0KVFYYjQsfABh/DFgf0JzS5hoc1pqrA1JOQotNs0dj+iOExKiKxWoqibS2rVrV5JSdgpKuYze33YdTqTclHwY4bwuEfyMk70DEbQjkPOa3D2CrzOYe7/PGfFHVIg6aqCsTu9U1EQitOqpjYSs08+l83XwqYCjHckUs29PG1bm0d56TEhuIzbc40UODmCYhocoXXoWv/wHvZwVctG73y4KPAOHe/8WokWGEkLsRTRTykyn/1cOHTq0mIcCf0zkwPY7RESkEBd0QJhiPBT4qzH7JYxm2fxp5qg1HHXdQ4F/acH2kyRP88b/QrpQzm5EZqB9YkT3KLtvcQ/Tjr2hJj6SY+T24z6yXv74iDUXAHnsU9JuBm1tAAAAAElFTkSuQmCC"))
+                 (:type "text" :text "describe this image")])]
+        :stream :json-false :temperature 1.0)
+#+end_src
+
+** tools
+
+#+begin_src elisp
+(gptel-make-tool
+ :name "read_buffer"                    ; javascript-style snake_case name
+ :function (lambda (buffer)                  ; the function that will run
+             (unless (buffer-live-p (get-buffer buffer))
+               (error "error: buffer %s is not live." buffer))
+             (with-current-buffer  buffer
+               (buffer-substring-no-properties (point-min) (point-max))))
+ :description "return the contents of an emacs buffer"
+ :args (list '(:name "buffer"
+               :type string            ; :type value must be a symbol
+               :description "the name of the buffer whose contents are to be retrieved"))
+ :category "emacs")                     ; An arbitrary label for grouping
+#+end_src
+
+
+#+begin_src gptel :dry-run t :wrap src elisp :tools read_buffer
+what's here?
+#+end_src
+
+#+RESULTS:
+#+begin_src elisp
+(:model "gpt-4o-mini" :messages [(:role "user" :content "what's here?")] :stream
+        :json-false :temperature 1.0 :tools
+        [(:type "function" :function
+                (:name "read_buffer" :description
+                       "return the contents of an emacs buffer" :parameters
+                       (:type "object" :properties
+                              (:buffer
+                               (:type "string" :description
+                                      "the name of the buffer whose contents are to be retrieved"))
+                              :required ["buffer"] :additionalProperties
+                              :json-false)))]
+        :parallel_tool_calls t)
+#+end_src
