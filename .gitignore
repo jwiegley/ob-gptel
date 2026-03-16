@@ -1,0 +1,7 @@
+*.elc
+result
+result-*
+coverage.lcov
+benchmark-results.txt
+.lefthook-local.yml
+.benchmark-local

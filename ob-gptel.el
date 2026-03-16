@@ -3,9 +3,10 @@
 ;; Copyright (C) 2025 John Wiegley
 
 ;; Author: John Wiegley
-;; Keywords: org, babel, ai, gptel
+;; URL: https://github.com/jwiegley/ob-gptel
+;; Keywords: comm processes
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "25.1") (org "9.0") (gptel "0.9.8.5"))
+;; Package-Requires: ((emacs "26.1") (gptel "0.9.8.5"))
 
 ;;; Commentary:
 
@@ -20,6 +21,7 @@
 ;;; Code:
 
 (require 'ob)
+(require 'org-element)
 (require 'gptel)
 
 (defvar org-babel-default-header-args:gptel
@@ -63,36 +65,36 @@ and the result in the ASSISTANT role."
 (defun ob-gptel--all-source-blocks (session)
   "Return all Source blocks before point with `:session' set to SESSION."
   (org-element-map
-      (save-restriction
-        (narrow-to-region (point-min) (point))
-        (org-element-parse-buffer))
-      '(src-block fixed-width)
-    (lambda (element)
-      (cond ((eq (org-element-type element) 'src-block)
-             (let ((start
-                    (org-element-property :begin element))
-                   (language
-                    (when (org-element-property :language element)
-                      (string-trim (org-element-property :language element))))
-                   (parameters
-                    (when (org-element-property :parameters element)
-                      (org-babel-parse-header-arguments
-                       (string-trim (org-element-property :parameters element))))))
-               (and (<= start (point))
-                    (equal session (cdr (assq :session parameters)))
-                    (list :start start
-                          :language language
-                          :parameters parameters
-                          :body
-                          (when (org-element-property :value element)
-                            (string-trim (org-element-property :value element)))
-                          :result
-                          (save-excursion
-                            (save-restriction
-                              (goto-char (org-element-property :begin element))
-                              (when (org-babel-where-is-src-block-result)
-                                (goto-char (org-babel-where-is-src-block-result))
-                                (org-babel-read-result))))))))))))
+   (save-restriction
+     (narrow-to-region (point-min) (point))
+     (org-element-parse-buffer))
+   '(src-block fixed-width)
+   (lambda (element)
+     (cond ((eq (org-element-type element) 'src-block)
+            (let ((start
+                   (org-element-property :begin element))
+                  (language
+                   (when (org-element-property :language element)
+                     (string-trim (org-element-property :language element))))
+                  (parameters
+                   (when (org-element-property :parameters element)
+                     (org-babel-parse-header-arguments
+                      (string-trim (org-element-property :parameters element))))))
+              (and (<= start (point))
+                   (equal session (cdr (assq :session parameters)))
+                   (list :start start
+                         :language language
+                         :parameters parameters
+                         :body
+                         (when (org-element-property :value element)
+                           (string-trim (org-element-property :value element)))
+                         :result
+                         (save-excursion
+                           (save-restriction
+                             (goto-char (org-element-property :begin element))
+                             (when (org-babel-where-is-src-block-result)
+                               (goto-char (org-babel-where-is-src-block-result))
+                               (org-babel-read-result))))))))))))
 
 (defun ob-gptel-find-session (session &optional system-message)
   "Given a SESSION identifier, find the blocks/result pairs it names.
@@ -154,66 +156,66 @@ This function sends the BODY text to GPTel and returns the response."
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
          (fsm
           (ob-gptel--with-preset (and preset (intern-soft preset))
-            (let ((gptel-model
-                   (if model
-                       (if (symbolp model) model (intern model))
-                     gptel-model))
-                  (gptel-temperature
-                   (if (and temperature (stringp temperature))
-                       (string-to-number temperature)
-                     gptel-temperature))
-                  (gptel-max-tokens
-                   (if (and max-tokens (stringp max-tokens))
-                       (string-to-number max-tokens)
-                     gptel-max-tokens))
-                  (gptel--system-message
-                   (or system-message
-                       gptel--system-message))
-                  (gptel-backend
-                   (if backend-name
-                       (let ((backend (gptel-get-backend backend-name)))
-                         (if backend
-                             (setq-local gptel-backend backend)
-                           gptel-backend))
-                     gptel-backend)))
-              (gptel-request
-                  body
-                :callback
-                #'(lambda (response _info)
-                    (when (stringp response)
-                      (with-current-buffer buffer
-                        (save-excursion
-                          (save-restriction
-                            (widen)
-                            (goto-char (point-min))
-                            (when (search-forward ob-gptel--uuid nil t)
-                              (let* ((match-start (match-beginning 0))
-                                     (match-end (match-end 0))
-                                     (formatted-response
-                                      (if (equal format "org")
-                                          (gptel--convert-markdown->org (string-trim response))
-                                        (string-trim response))))
-                                (goto-char match-start)
-                                (delete-region match-start match-end)
-                                (insert formatted-response))))))))
-                :buffer (current-buffer)
-                :transforms (list #'gptel--transform-apply-preset
-                                  (ob-gptel--add-context context))
-                :system
-                (cond (prompt
-                       (with-current-buffer buffer
-                         (ob-gptel-find-prompt prompt system-message)))
-                      (session
-                       (with-current-buffer buffer
-                         (ob-gptel-find-session session system-message))))
-                :dry-run dry-run
-                :stream nil)))))
+				 (let ((gptel-model
+					(if model
+					    (if (symbolp model) model (intern model))
+					  gptel-model))
+				       (gptel-temperature
+					(if (and temperature (stringp temperature))
+					    (string-to-number temperature)
+					  gptel-temperature))
+				       (gptel-max-tokens
+					(if (and max-tokens (stringp max-tokens))
+					    (string-to-number max-tokens)
+					  gptel-max-tokens))
+				       (gptel--system-message
+					(or system-message
+					    gptel--system-message))
+				       (gptel-backend
+					(if backend-name
+					    (let ((backend (gptel-get-backend backend-name)))
+					      (if backend
+						  (setq-local gptel-backend backend)
+						gptel-backend))
+					  gptel-backend)))
+				   (gptel-request
+				    body
+				    :callback
+				    #'(lambda (response _info)
+					(when (stringp response)
+					  (with-current-buffer buffer
+					    (save-excursion
+					      (save-restriction
+						(widen)
+						(goto-char (point-min))
+						(when (search-forward ob-gptel--uuid nil t)
+						  (let* ((match-start (match-beginning 0))
+							 (match-end (match-end 0))
+							 (formatted-response
+							  (if (equal format "org")
+							      (gptel--convert-markdown->org (string-trim response))
+							    (string-trim response))))
+						    (goto-char match-start)
+						    (delete-region match-start match-end)
+						    (insert formatted-response))))))))
+				    :buffer (current-buffer)
+				    :transforms (list #'gptel--transform-apply-preset
+						      (ob-gptel--add-context context))
+				    :system
+				    (cond (prompt
+					   (with-current-buffer buffer
+					     (ob-gptel-find-prompt prompt system-message)))
+					  (session
+					   (with-current-buffer buffer
+					     (ob-gptel-find-session session system-message))))
+				    :dry-run dry-run
+				    :stream nil)))))
     (if dry-run
         (thread-first
-          fsm
-          (gptel-fsm-info)
-          (plist-get :data)
-          (pp-to-string))
+         fsm
+         (gptel-fsm-info)
+         (plist-get :data)
+         (pp-to-string))
       ob-gptel--uuid)))
 
 (defun org-babel-prep-session:gptel (session _params)
@@ -274,16 +276,15 @@ GPTel blocks don't use sessions, so this is a no-op."
                                 (lambda (m) (get (intern m) :description))))
                          ("preset" (cons gptel--known-presets
                                          (lambda (p) (thread-first
-                                                  (cdr (assq (intern p) gptel--known-presets))
-                                                  (plist-get :description)))))
+                                                      (cdr (assq (intern p) gptel--known-presets))
+                                                      (plist-get :description)))))
                          ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
                          ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format"))))))
             (list start end (all-completions word (car comp-and-annotation))
                   :exclusive 'no
                   :annotation-function (cdr comp-and-annotation))))))))
 
-(with-eval-after-load 'org-src
-  (add-to-list 'org-src-lang-modes '("gptel" . text)))
+(add-to-list 'org-src-lang-modes '("gptel" . text))
 
 (provide 'ob-gptel)
 

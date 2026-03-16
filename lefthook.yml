@@ -1,0 +1,9 @@
+pre-commit:
+  parallel: true
+  commands:
+    nix-checks:
+      glob: "*.{el,nix}"
+      run: nix flake check --no-warn-dirty 2>&1
+    nix-build:
+      glob: "*.{el,nix}"
+      run: nix build --no-warn-dirty 2>&1

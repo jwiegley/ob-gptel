@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Run all checks
+        run: nix flake check --no-warn-dirty
+
+      - name: Build package
+        run: nix build --no-warn-dirty
+
+      - name: Generate coverage report
+        run: |
+          nix build .#coverage-report --no-warn-dirty -o coverage-output
+          if [ -f coverage-output/coverage.lcov ]; then
+            echo "Coverage report generated"
+            cat coverage-output/coverage.lcov | head -50
+          fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-output/
+          if-no-files-found: ignore
+
+      - name: Generate benchmark report
+        run: |
+          nix build .#benchmark-report --no-warn-dirty -o benchmark-output
+          echo "Benchmark results:"
+          cat benchmark-output
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark-output
+          if-no-files-found: ignore
