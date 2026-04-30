@@ -203,14 +203,14 @@ The result is trimmed; returns nil when the region is empty."
   "Return non-nil when the `pending' library is loadable."
   (featurep 'pending))
 
-(defun ob-gptel--legacy-replace (buffer text block-marker result-params)
+(defun ob-gptel--legacy-replace (buffer text block-start result-params)
   "In BUFFER, find UUID and atomically replace it with TEXT."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (save-excursion
         (save-restriction
           (widen)
-          (goto-char (block-marker))
+          (goto-char block-start)
           (org-babel-insert-result  text result-params))))))
 
 (defun ob-gptel--format-response (response format)
@@ -252,7 +252,7 @@ found."
               (setcar cell token)
               token)))))))
 
-(defun ob-gptel--make-callback (buffer format cell block-marker result-params)
+(defun ob-gptel--make-callback (buffer format cell block-start result-params)
   "Return a gptel callback closure for an async block.
 The callback uses the pending token in (car CELL) when active;
 otherwise it falls back to UUID-based search/replace.
@@ -267,7 +267,7 @@ time."
                    (ob-gptel--use-pending-p)
                    (pending-active-p token))
               (pending-finish token text)
-            (ob-gptel--legacy-replace buffer text block-marker result-params))))
+            (ob-gptel--legacy-replace buffer text block-start result-params))))
        ;; gptel signals abort by calling the callback with the
        ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
        ;; to clean up via the on-cancel path; do nothing here.
@@ -281,7 +281,7 @@ time."
               (pending-reject token (format "%s" reason))
             (ob-gptel--legacy-replace
              buffer
-             (format "(gptel error: %s)" reason) block-marker result-params))))))))
+             (format "(gptel error: %s)" reason) block-start result-params))))))))
 
 (defun org-babel-execute:gptel (body params)
   "Execute a gptel source block with BODY and PARAMS.
@@ -357,6 +357,7 @@ This function sends the BODY text to GPTel and returns the response."
 					   (with-current-buffer buffer
 					     (ob-gptel-find-prompt prompt system-message)))
 					  (session
+					   (goto-char block-start)
 					   (with-current-buffer buffer
 					     (ob-gptel-find-session session system-message))))
 				    :dry-run dry-run
