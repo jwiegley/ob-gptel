@@ -204,6 +204,7 @@ This function sends the BODY text to GPTel and returns the response."
 					   (with-current-buffer buffer
 					     (ob-gptel-find-prompt prompt system-message)))
 					  (session
+					   (goto-char block-start)
 					   (with-current-buffer buffer
 					     (ob-gptel-find-session session system-message))))
 				    :dry-run dry-run
