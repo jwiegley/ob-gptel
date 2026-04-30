@@ -151,6 +151,10 @@ This function sends the BODY text to GPTel and returns the response."
          (context (cdr (assoc :context params)))
          (format (cdr (assoc :format params)))
          (dry-run (cdr (assoc :dry-run params)))
+         (result-params (cdr (assoc :result-params params)))
+         (block-marker (copy-marker (save-excursion
+                                      (org-babel-where-is-src-block-head))
+                                    t))
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
@@ -187,17 +191,12 @@ This function sends the BODY text to GPTel and returns the response."
 					    (save-excursion
 					      (save-restriction
 						(widen)
-						(goto-char (point-min))
-						(when (search-forward ob-gptel--uuid nil t)
-						  (let* ((match-start (match-beginning 0))
-							 (match-end (match-end 0))
-							 (formatted-response
-							  (if (equal format "org")
-							      (gptel--convert-markdown->org (string-trim response))
-							    (string-trim response))))
-						    (goto-char match-start)
-						    (delete-region match-start match-end)
-						    (insert formatted-response))))))))
+						(goto-char block-marker)
+                                                (org-babel-insert-result
+                                                 (if (equal format "org")
+                                                     (gptel--convert-markdown->org (string-trim response))
+                                                   (string-trim response))
+                                                 result-params))))))
 				    :buffer (current-buffer)
 				    :transforms (list #'gptel--transform-apply-preset
 						      (ob-gptel--add-context context))
