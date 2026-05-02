@@ -454,5 +454,259 @@
       (let ((completions (nth 2 completion-data)))
         (should (member "entry" completions))))))
 
+;;; ob-gptel--all-source-blocks tests
+
+(ert-deftest ob-gptel-test-all-source-blocks-single ()
+  "Test collecting a single source block from a session."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session my-sess :model gpt-4\n")
+    (insert "Hello world\n")
+    (insert "#+end_src\n")
+    ;; ob-gptel--all-source-blocks narrows to (point-min .. point),
+    ;; so point must be past the blocks we want to find.
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "my-sess")))
+      (should (= (length blocks) 1))
+      (should (equal (plist-get (car blocks) :language) "gptel"))
+      (should (equal (plist-get (car blocks) :body) "Hello world"))
+      (should (equal (cdr (assoc :model (plist-get (car blocks) :parameters)))
+                     "gpt-4")))))
+
+(ert-deftest ob-gptel-test-all-source-blocks-multiple ()
+  "Test collecting multiple source blocks from one session."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session shared\n")
+    (insert "First block\n")
+    (insert "#+end_src\n\n")
+    (insert "#+RESULTS:\n: answer1\n\n")
+    (insert "#+begin_src gptel :session shared\n")
+    (insert "Second block\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "shared")))
+      (should (= (length blocks) 2))
+      (should (equal (plist-get (nth 0 blocks) :body) "First block"))
+      (should (equal (plist-get (nth 1 blocks) :body) "Second block")))))
+
+(ert-deftest ob-gptel-test-all-source-blocks-ignores-other-sessions ()
+  "Test that only blocks matching SESSION are returned."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session alpha\n")
+    (insert "Alpha\n")
+    (insert "#+end_src\n\n")
+    (insert "#+begin_src gptel :session beta\n")
+    (insert "Beta\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "alpha")))
+      (should (= (length blocks) 1))
+      (should (equal (plist-get (car blocks) :body) "Alpha")))
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "beta")))
+      (should (= (length blocks) 1))
+      (should (equal (plist-get (car blocks) :body) "Beta")))))
+
+(ert-deftest ob-gptel-test-all-source-blocks-no-match ()
+  "Test that no blocks are returned for an unknown session."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session other\nHello\n#+end_src\n")
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "nonexistent")))
+      (should (null blocks)))))
+
+(ert-deftest ob-gptel-test-all-source-blocks-with-result ()
+  "Test that block results are captured when present."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session sess-with-result\n")
+    (insert "Question\n")
+    (insert "#+end_src\n")
+    (insert "\n")
+    (insert "#+RESULTS:\n")
+    (insert ": Answer\n")
+    (goto-char (point-max))
+    (let ((blocks (ob-gptel--all-source-blocks "sess-with-result")))
+      (should (= (length blocks) 1))
+      (should (string-match-p "Answer" (plist-get (car blocks) :result))))))
+
+(ert-deftest ob-gptel-test-all-source-blocks-block-after-point ()
+  "Test that blocks after point are excluded."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session sess\n")
+    (insert "Before point\n")
+    (insert "#+end_src\n\n")
+    (insert "#+RESULTS:\n\n")
+    (insert "#+begin_src gptel :session sess\n")
+    (insert "After point\n")
+    (insert "#+end_src\n")
+    ;; Save the position just past the first block's #+end_src
+    (let ((halfway (save-excursion
+                     (goto-char (point-min))
+                     (search-forward "#+end_src")
+                     (point))))
+      ;; Now narrow to before the second block so it's excluded.
+      (narrow-to-region (point-min) halfway)
+      (let ((blocks (ob-gptel--all-source-blocks "sess")))
+        (should (= (length blocks) 1))
+        (should (equal (plist-get (car blocks) :body) "Before point"))))))
+
+;;; ob-gptel-find-session-param tests
+
+(ert-deftest ob-gptel-test-find-session-param-block-override ()
+  "Test that the block's own param takes precedence over session fallback."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session sess :model gpt-3.5\n")
+    (insert "First\n")
+    (insert "#+end_src\n")
+    (insert "\n")
+    (insert "#+begin_src gptel :session sess :model gpt-4\n")
+    (insert "Second\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    ;; Block params explicitly provide :model, so no fallback needed.
+    (should (equal (ob-gptel-find-session-param :model '((:model . "gpt-4o")) "sess")
+                   "gpt-4o"))
+    ;; Block params explicitly provide :model, session blocks are ignored.
+    (should (equal (ob-gptel-find-session-param :model '((:model . "override")) "sess")
+                   "override"))))
+
+(ert-deftest ob-gptel-test-find-session-param-fallback-to-session ()
+  "Test that nil block param falls back to latest session block value."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session sess :model gpt-3.5\n")
+    (insert "First\n")
+    (insert "#+end_src\n")
+    (insert "\n")
+    (insert "#+begin_src gptel :session sess :temperature 0.9\n")
+    (insert "Second\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    ;; :model not in block params, should fallback to latest session block.
+    (should (equal (ob-gptel-find-session-param :model '((:model)) "sess") "gpt-3.5"))
+    ;; :temperature is explicitly set in the latest block (parsed as number).
+    (should (equal (ob-gptel-find-session-param :temperature '((:temperature)) "sess")
+                   0.9))))
+
+(ert-deftest ob-gptel-test-find-session-param-no-session-match ()
+  "Test that nil is returned when no session blocks exist."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session other\nHello\n#+end_src\n")
+    (goto-char (point-max))
+    (should (null (ob-gptel-find-session-param :model '() "nonexistent")))))
+
+(ert-deftest ob-gptel-test-find-session-param-no-session-param-nil ()
+  "Test that nil is returned when block has no param and no session fallback."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel\nHello\n#+end_src\n")
+    (goto-char (point-max))
+    (should (null (ob-gptel-find-session-param :model '() "any")))))
+
+(ert-deftest ob-gptel-test-find-session-param-fallback-is-latest ()
+  "Test that session fallback returns the *latest* defined param."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session sess :model gpt-3.5\n")
+    (insert "First\n")
+    (insert "#+end_src\n")
+    (insert "\n")
+    (insert "#+begin_src gptel :session sess :model gpt-4\n")
+    (insert "Second\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    ;; The latest block defines :model as gpt-4, so that should win.
+    (should (equal (ob-gptel-find-session-param :model '((:model)) "sess")
+                   "gpt-4"))))
+
+(ert-deftest ob-gptel-test-find-session-param-covers-inherited-params ()
+  "Each inheritable param can be found from prior session history."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session s :model gpt-4 :temperature 0.7 :max-tokens 500 :backend openai :system be-helpful :preset default :context ctx.txt :format markdown\n")
+    (insert "one\n")
+    (insert "#+end_src\n\n")
+    (insert "#+begin_src gptel :session s\n")
+    (insert "two\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    (let ((params '((:session . "s"))))
+      (should (equal (ob-gptel-find-session-param :model params "s") "gpt-4"))
+      (should (equal (ob-gptel-find-session-param :temperature params "s") 0.7))
+      (should (equal (ob-gptel-find-session-param :max-tokens params "s") 500))
+      (should (equal (ob-gptel-find-session-param :backend params "s") "openai"))
+      (should (equal (ob-gptel-find-session-param :system params "s") "be-helpful"))
+      (should (equal (ob-gptel-find-session-param :preset params "s") "default"))
+      (should (equal (ob-gptel-find-session-param :context params "s") "ctx.txt"))
+      (should (equal (ob-gptel-find-session-param :format params "s") "markdown")))))
+
+(ert-deftest ob-gptel-test-execute-uses-inherited-session-params ()
+  "Executor applies inherited params from session history."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session test-sess :model inherited-model :temperature 0.8 :max-tokens 200 :system sys-msg\n")
+    (insert "first\n")
+    (insert "#+end_src\n\n")
+    (insert "#+begin_src gptel :session test-sess\n")
+    (insert "question\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    (let* ((info (org-babel-get-src-block-info))
+           (body (nth 1 info))
+           (params (nth 2 info))
+           captured-model
+           captured-temperature
+           captured-max-tokens
+           captured-system
+           captured-format)
+      (cl-letf (((symbol-function 'gptel-request)
+                 (lambda (_prompt &rest args)
+                   (setq captured-model gptel-model)
+                   (setq captured-temperature gptel-temperature)
+                   (setq captured-max-tokens gptel-max-tokens)
+                   (setq captured-system (plist-get args :system))
+                   (setq captured-format (plist-get args :format))
+                   'fake-fsm))
+                ((symbol-function 'org-id-uuid)
+                 (lambda () "test-uuid")))
+        (should (equal (org-babel-execute:gptel body params)
+                       "<gptel_thinking_test-uuid>")))
+      (should (equal captured-model 'inherited-model))
+      (should (= captured-temperature 0.8))
+      (should (= captured-max-tokens 200))
+      (should (member "sys-msg" captured-system)))))
+
+(ert-deftest ob-gptel-test-execute-does-not-inherit-tools ()
+  ":tools should not be inherited from prior session blocks."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :session test-sess :tools \"dangerous-tool\"\n")
+    (insert "one\n")
+    (insert "#+end_src\n\n")
+    (insert "#+begin_src gptel :session test-sess\n")
+    (insert "two\n")
+    (insert "#+end_src\n")
+    (goto-char (point-max))
+    (let* ((info (org-babel-get-src-block-info))
+           (body (nth 1 info))
+           (params (nth 2 info))
+           captured-tools)
+      (cl-letf (((symbol-function 'gptel-request)
+                 (lambda (_prompt &rest _args)
+                   (setq captured-tools gptel-tools)
+                   'fake-fsm))
+                ((symbol-function 'org-id-uuid)
+                 (lambda () "test-uuid")))
+        (should (equal (org-babel-execute:gptel body params)
+                       "<gptel_thinking_test-uuid>")))
+      (should-not captured-tools))))
+
 (provide 'ob-gptel-test)
 ;;; ob-gptel-test.el ends here
