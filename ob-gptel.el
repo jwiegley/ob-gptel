@@ -53,6 +53,7 @@
     (:context . nil)
     (:prompt . nil)
     (:session . nil)
+    (:entry . nil)
     (:format . "org"))
   "Default header arguments for gptel source blocks.")
 
@@ -152,6 +153,42 @@ symbol."
          nil
        (if name (gptel--apply-preset name))
        ,@body)))
+
+(defun ob-gptel--entry-text-before-block ()
+  "Return entry text from the heading body up to the current src block.
+The returned string spans from `org-end-of-meta-data' of the
+enclosing heading (which skips the heading line itself, PROPERTIES,
+planning lines, and LOGBOOK) to the `:begin' of the src block at
+point.  When no enclosing heading exists, the start is `point-min'.
+The result is trimmed; returns nil when the region is empty."
+  (save-excursion
+    (let* ((element (org-element-context))
+           (src-begin
+            (cond
+             ((and element
+                   (memq (org-element-type element)
+                         '(src-block inline-src-block)))
+              (org-element-property :begin element))
+             ;; Fallback: search backward from point for #+begin_src gptel.
+             ((save-excursion
+                (re-search-backward
+                 "^[ \t]*#\\+begin_src[ \t]+gptel" nil t))))))
+      (when src-begin
+        (let ((entry-start
+               (save-excursion
+                 (goto-char src-begin)
+                 (if (and (derived-mode-p 'org-mode)
+                          (ignore-errors (org-back-to-heading t)))
+                     (progn
+                       ;; Skip heading line + planning + drawers.
+                       (org-end-of-meta-data t)
+                       (point))
+                   (point-min)))))
+          (when (< entry-start src-begin)
+            (let ((text (string-trim
+                         (buffer-substring-no-properties
+                          entry-start src-begin))))
+              (and (not (string-empty-p text)) text))))))))
 
 ;;; Pending integration helpers
 
@@ -257,8 +294,18 @@ This function sends the BODY text to GPTel and returns the response."
          (context (cdr (assoc :context params)))
          (format (cdr (assoc :format params)))
          (dry-run (cdr (assoc :dry-run params)))
+         (entry (cdr (assoc :entry params)))
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
+         (entry (and entry (not (member entry '("no" "nil" "false")))))
+         (effective-body
+          (if entry
+              (let ((prefix
+                     (with-current-buffer buffer
+                       (save-excursion
+                         (ob-gptel--entry-text-before-block)))))
+                (if prefix (concat prefix "\n\n" body) body))
+            body))
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
          ;; Shared cell for communicating the pending token between
          ;; the adoption hook and the gptel callback.
@@ -292,7 +339,7 @@ This function sends the BODY text to GPTel and returns the response."
 					  gptel-backend)))
 				   (setq resolved-model gptel-model)
 				   (gptel-request
-				    body
+				    effective-body
 				    :callback
 				    (ob-gptel--make-callback
 				     ob-gptel--uuid buffer format cell)
@@ -368,6 +415,7 @@ GPTel blocks don't use sessions, so this is a no-op."
                           ("system"  . "System message for request")
                           ("prompt"  . "Include result of other block")
                           ("context" . "List of files to include")
+                          ("entry"   . "Include preceding entry text")
                           ("format"  . "Output format: markdown or org"))))
               (list start end (all-completions word args)
                     :annotation-function #'(lambda (c) (cdr-safe (assoc c args)))
@@ -393,6 +441,7 @@ GPTel blocks don't use sessions, so this is a no-op."
                                                       (cdr (assq (intern p) gptel--known-presets))
                                                       (plist-get :description)))))
                          ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
+                         ("entry" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
                          ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format"))))))
             (list start end (all-completions word (car comp-and-annotation))
                   :exclusive 'no

@@ -318,5 +318,121 @@
                                              (current-buffer) "label" cell))
         (should (null (car cell)))))))
 
+;;; Entry-context tests
+
+(ert-deftest ob-gptel-test-default-args-entry ()
+  "`:entry' defaults to nil in the default header args alist."
+  (should (assoc :entry org-babel-default-header-args:gptel))
+  (should-not (cdr (assoc :entry org-babel-default-header-args:gptel))))
+
+(ert-deftest ob-gptel-test-entry-text-captures-prose ()
+  "Entry helper returns the prose preceding the src block."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* My heading\n")
+    (insert "Prose line one.\n")
+    (insert "Prose line two.\n")
+    (insert "\n")
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Question?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (let ((text (ob-gptel--entry-text-before-block)))
+      (should (stringp text))
+      (should (string-match-p "Prose line one\\." text))
+      (should (string-match-p "Prose line two\\." text))
+      (should-not (string-match-p "My heading" text))
+      (should-not (string-match-p "begin_src" text)))))
+
+(ert-deftest ob-gptel-test-entry-text-skips-properties-and-planning ()
+  "Entry helper skips :PROPERTIES:, planning, and :LOGBOOK: drawers."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Heading with metadata\n")
+    (insert "SCHEDULED: <2025-01-01 Wed>\n")
+    (insert ":PROPERTIES:\n:CUSTOM_ID: foo\n:END:\n")
+    (insert ":LOGBOOK:\n- Note taken on [2025-01-02 Thu] \\\\\n  whatever\n:END:\n")
+    (insert "Actual prose here.\n")
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Q?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (let ((text (ob-gptel--entry-text-before-block)))
+      (should (stringp text))
+      (should (string-match-p "Actual prose here" text))
+      (should-not (string-match-p "SCHEDULED" text))
+      (should-not (string-match-p "CUSTOM_ID" text))
+      (should-not (string-match-p "LOGBOOK" text))
+      (should-not (string-match-p "Note taken" text)))))
+
+(ert-deftest ob-gptel-test-entry-text-empty-when-block-is-first ()
+  "Entry helper returns nil when block immediately follows the heading."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Heading\n")
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Q?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (should-not (ob-gptel--entry-text-before-block))))
+
+(ert-deftest ob-gptel-test-entry-text-uses-current-heading-only ()
+  "Entry helper captures only the heading containing the block."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Parent\n")
+    (insert "Parent prose should not appear.\n")
+    (insert "** Child\n")
+    (insert "Child prose should appear.\n")
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Q?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (let ((text (ob-gptel--entry-text-before-block)))
+      (should (stringp text))
+      (should (string-match-p "Child prose should appear\\." text))
+      (should-not (string-match-p "Parent prose" text)))))
+
+(ert-deftest ob-gptel-test-entry-text-no-heading-uses-buffer-start ()
+  "Entry helper falls back to point-min when no heading exists."
+  (with-temp-buffer
+    (org-mode)
+    (insert "Loose prose at top of buffer.\n")
+    (insert "More loose prose.\n")
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Q?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (let ((text (ob-gptel--entry-text-before-block)))
+      (should (stringp text))
+      (should (string-match-p "Loose prose at top" text))
+      (should (string-match-p "More loose prose" text)))))
+
+(ert-deftest ob-gptel-test-entry-text-buffer-start-empty ()
+  "Entry helper returns nil when block is at top of buffer with no content."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :entry t\n")
+    (insert "Q?\n")
+    (insert "#+end_src\n")
+    (goto-char (point-min))
+    (search-forward "#+begin_src gptel")
+    (should-not (ob-gptel--entry-text-before-block))))
+
+(ert-deftest ob-gptel-test-capf-advertises-entry ()
+  "Completion-at-point advertises the :entry header arg."
+  (with-temp-buffer
+    (org-mode)
+    (insert "#+begin_src gptel :")
+    (let ((completion-data (ob-gptel-capf)))
+      (should completion-data)
+      (let ((completions (nth 2 completion-data)))
+        (should (member "entry" completions))))))
+
 (provide 'ob-gptel-test)
 ;;; ob-gptel-test.el ends here
