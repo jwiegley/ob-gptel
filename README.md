@@ -127,6 +127,29 @@ What about its history?
 #+end_src
 ```
 
+### Summarizing the surrounding entry
+
+`:entry t` prepends the prose preceding the block — from the start of
+the enclosing heading's body (after PROPERTIES, planning, and LOGBOOK
+drawers) up to the block — to the body that's sent. Useful for asking
+the model to summarize, critique, or transform notes you've already
+written:
+
+```org
+* Notes on flux capacitors
+The 1985 paper claims the energy gradient is non-monotonic, which
+implies… [lots more prose, lists, even other src blocks]
+
+#+begin_src gptel :entry t
+Summarize the above in three bullet points.
+#+end_src
+```
+
+If no enclosing heading exists, the captured region runs from the start
+of the buffer. `:entry` composes with `:prompt` and `:session` — those
+still build the prior conversational turns, while `:entry` augments the
+current user message.
+
 ### Presets
 
 If you've configured gptel presets, you can use them:
@@ -176,6 +199,7 @@ find /tmp -type f -links +1
 | `:prompt`      | nil         | Named block for conversation context       |
 | `:session`     | nil         | Session name for multi-turn conversations  |
 | `:context`     | nil         | Files to include as context                |
+| `:entry`       | nil         | Prepend preceding entry prose to the body  |
 | `:format`      | `"org"`     | Output format: `"markdown"` or `"org"`     |
 | `:dry-run`     | nil         | Inspect payload without sending            |
 | `:results`     | `"replace"` | Standard Org Babel results handling        |

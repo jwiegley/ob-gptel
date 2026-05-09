@@ -16,6 +16,7 @@ for documentation, exploration, and interactive workflows.
   - Dry-run mode to inspect API calls without sending them
   - Integration with Org's export and tangling features
   - Reusable prompts through named blocks
+  - Optional inclusion of the surrounding Org entry as context (=:entry t=)
 
 - Installation
 
@@ -129,6 +130,29 @@ Can you give me an example calculation?
 ,#+end_src
 #+end_src
 
+** Summarizing the Surrounding Entry
+
+The =:entry t= header argument prepends the prose preceding the block —
+from the start of the enclosing heading's body (after =:PROPERTIES:=,
+planning, and =:LOGBOOK:= drawers) up to the block itself — to the body
+that is sent. This is useful for asking the model to summarize,
+critique, or transform notes you've already written:
+
+#+begin_src org
+,* Notes on flux capacitors
+The 1985 paper claims the energy gradient is non-monotonic, which
+implies... [lots more prose, lists, even other src blocks]
+
+,#+begin_src gptel :entry t
+Summarize the above in three bullet points.
+,#+end_src
+#+end_src
+
+If no enclosing heading exists, the captured region runs from the start
+of the buffer. =:entry= composes with =:prompt= and =:session= — those
+still build the prior conversational turns, while =:entry= augments
+the current user message.
+
 ** Output Format
 
 By default, responses are returned in markdown format. You can request Org mode format instead:
@@ -161,6 +185,7 @@ What would this request look like?
 | =:backend=     | nil        | gptel backend to use                                 |
 | =:dry-run=     | nil        | Show request without sending (=yes= to enable)         |
 | =:context=     | nil        | Additional context for the query                     |
+| =:entry=       | nil        | Prepend preceding entry prose to the body            |
 | =:prompt=      | nil        | Name of a previous block to use as conversation base |
 | =:session=     | nil        | Session name of blocks to use as conversation base   |
 | =:preset=      | nil        | Name of preset to use                                |

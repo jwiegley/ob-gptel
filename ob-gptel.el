@@ -17,6 +17,13 @@
 ;;   #+begin_src gptel :model gpt-4 :temperature 0.7
 ;;   What is the capital of France?
 ;;   #+end_src
+;;
+;; Header arguments include :model, :temperature, :max-tokens, :system,
+;; :backend, :preset, :context (files), :prompt (named block as prior
+;; turn), :session (id linking earlier blocks as prior turns), :format
+;; (\"org\" or \"markdown\"), :dry-run (inspect payload), and :entry
+;; (when t, prepend the prose preceding the block in its enclosing org
+;; entry to the body — handy for \"summarize the above\" style queries).
 
 ;;; Code:
 
