@@ -216,5 +216,107 @@
   (should (equal (org-babel-prep-session:gptel "my-session" nil)
                  "my-session")))
 
+;;; Pending integration tests
+
+(ert-deftest ob-gptel-test-use-pending-p-honors-feature ()
+  "Predicate reflects whether `pending' is loaded."
+  (cl-letf (((symbol-function 'featurep)
+             (lambda (f &optional _) (eq f 'pending))))
+    (should (ob-gptel--use-pending-p)))
+  (cl-letf (((symbol-function 'featurep)
+             (lambda (_f &optional _) nil)))
+    (should-not (ob-gptel--use-pending-p))))
+
+(ert-deftest ob-gptel-test-legacy-replace-replaces-uuid ()
+  "`ob-gptel--legacy-replace' substitutes the UUID with the response."
+  (with-temp-buffer
+    (insert "before <gptel-uuid> after")
+    (ob-gptel--legacy-replace "<gptel-uuid>" (current-buffer) "RESULT")
+    (should (equal (buffer-string) "before RESULT after"))))
+
+(ert-deftest ob-gptel-test-legacy-replace-noop-when-missing ()
+  "`ob-gptel--legacy-replace' is a no-op when UUID is absent."
+  (with-temp-buffer
+    (insert "no marker here")
+    (ob-gptel--legacy-replace "<gptel-uuid>" (current-buffer) "RESULT")
+    (should (equal (buffer-string) "no marker here"))))
+
+(ert-deftest ob-gptel-test-format-response-trims ()
+  "`ob-gptel--format-response' trims whitespace."
+  (cl-letf (((symbol-function 'gptel--convert-markdown->org)
+             (lambda (s) (concat "ORG:" s))))
+    (should (equal (ob-gptel--format-response "  hi  " "markdown") "hi"))
+    (should (equal (ob-gptel--format-response "  hi  " "org") "ORG:hi"))))
+
+(ert-deftest ob-gptel-test-make-callback-uses-legacy-when-no-token ()
+  "Callback falls back to UUID search/replace when no pending token."
+  (with-temp-buffer
+    (insert "X<gptel-uuid>X")
+    (let* ((cell (cons nil nil))
+           (cb (ob-gptel--make-callback "<gptel-uuid>"
+                                        (current-buffer) "markdown" cell)))
+      (funcall cb "RESULT" nil)
+      (should (equal (buffer-string) "XRESULTX")))))
+
+(ert-deftest ob-gptel-test-make-callback-prefers-pending-when-active ()
+  "Callback calls `pending-finish' when token is active."
+  (let* ((cell (cons 'fake-token nil))
+         (finish-args nil)
+         ;; Stub featurep so the predicate sees pending as loaded.
+         (orig-featurep (symbol-function 'featurep)))
+    (cl-letf (((symbol-function 'featurep)
+               (lambda (f &optional v)
+                 (or (eq f 'pending) (funcall orig-featurep f v))))
+              ((symbol-function 'pending-active-p)
+               (lambda (tok) (eq tok 'fake-token)))
+              ((symbol-function 'pending-finish)
+               (lambda (tok text) (setq finish-args (list tok text)) t)))
+      (with-temp-buffer
+        (let ((cb (ob-gptel--make-callback "<gptel-uuid>"
+                                           (current-buffer) "markdown" cell)))
+          (funcall cb "  hello  " nil)))
+      (should (equal finish-args '(fake-token "hello"))))))
+
+(ert-deftest ob-gptel-test-make-callback-rejects-on-error ()
+  "Callback calls `pending-reject' when response is not a string."
+  (let* ((cell (cons 'fake-token nil))
+         (reject-args nil)
+         (orig-featurep (symbol-function 'featurep)))
+    (cl-letf (((symbol-function 'featurep)
+               (lambda (f &optional v)
+                 (or (eq f 'pending) (funcall orig-featurep f v))))
+              ((symbol-function 'pending-active-p)
+               (lambda (_) t))
+              ((symbol-function 'pending-reject)
+               (lambda (tok reason &optional _)
+                 (setq reject-args (list tok reason)) t)))
+      (with-temp-buffer
+        (let ((cb (ob-gptel--make-callback "<gptel-uuid>"
+                                           (current-buffer) "markdown" cell)))
+          (funcall cb nil '(:error "boom")))
+        (should (equal (car reject-args) 'fake-token))
+        (should (string-match-p "boom" (cadr reject-args)))))))
+
+(ert-deftest ob-gptel-test-make-callback-abort-is-noop ()
+  "Callback does not touch the buffer when response is symbol `abort'."
+  (with-temp-buffer
+    (insert "X<gptel-uuid>X")
+    (let* ((cell (cons nil nil))
+           (cb (ob-gptel--make-callback "<gptel-uuid>"
+                                        (current-buffer) "markdown" cell)))
+      (funcall cb 'abort nil)
+      (should (equal (buffer-string) "X<gptel-uuid>X")))))
+
+(ert-deftest ob-gptel-test-adopt-pending-noop-without-feature ()
+  "`ob-gptel--adopt-pending' is a no-op when pending is not loaded."
+  (cl-letf (((symbol-function 'featurep)
+             (lambda (_f &optional _) nil)))
+    (with-temp-buffer
+      (insert "X<gptel-uuid>X")
+      (let ((cell (cons nil nil)))
+        (should-not (ob-gptel--adopt-pending "<gptel-uuid>"
+                                             (current-buffer) "label" cell))
+        (should (null (car cell)))))))
+
 (provide 'ob-gptel-test)
 ;;; ob-gptel-test.el ends here

@@ -24,6 +24,22 @@
 (require 'org-element)
 (require 'gptel)
 
+;; Optional: when available, use the `pending' library for async
+;; placeholders instead of the UUID search/replace fallback.
+(require 'pending nil t)
+
+;; Forward declarations to keep the byte-compiler quiet when the
+;; optional `pending' library is not loaded.  When `pending' is
+;; available these resolve to its real definitions; otherwise the
+;; helpers that reference them are guarded by `ob-gptel--use-pending-p'.
+(declare-function pending-make "pending"
+                  (buffer &rest keys))
+(declare-function pending-finish "pending" (token text))
+(declare-function pending-reject "pending" (token reason &optional replacement-text))
+(declare-function pending-active-p "pending" (token))
+(declare-function pending-buffer "pending" (token))
+(declare-function gptel-abort "gptel" (buf))
+
 (defvar org-babel-default-header-args:gptel
   '((:results . "replace")
     (:exports . "both")
@@ -137,6 +153,96 @@ symbol."
        (if name (gptel--apply-preset name))
        ,@body)))
 
+;;; Pending integration helpers
+
+(defun ob-gptel--use-pending-p ()
+  "Return non-nil when the `pending' library is loadable."
+  (featurep 'pending))
+
+(defun ob-gptel--legacy-replace (uuid buffer text)
+  "In BUFFER, find UUID and atomically replace it with TEXT."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (save-restriction
+          (widen)
+          (goto-char (point-min))
+          (when (search-forward uuid nil t)
+            (let ((s (match-beginning 0))
+                  (e (match-end 0)))
+              (goto-char s)
+              (delete-region s e)
+              (insert text))))))))
+
+(defun ob-gptel--format-response (response format)
+  "Trim RESPONSE and convert markdown->org if FORMAT equals \"org\"."
+  (let ((trimmed (string-trim response)))
+    (if (equal format "org")
+        (gptel--convert-markdown->org trimmed)
+      trimmed)))
+
+(defun ob-gptel--adopt-pending (uuid buffer label cell)
+  "Find UUID in BUFFER and adopt its region as a pending placeholder.
+Store the resulting token in (car CELL) and return it.  No-op if the
+pending library is not loaded, BUFFER is dead, or UUID cannot be
+found."
+  (when (and (ob-gptel--use-pending-p)
+             (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (save-excursion
+        (save-restriction
+          (widen)
+          (goto-char (point-min))
+          (when (search-forward uuid nil t)
+            (let* ((s (copy-marker (match-beginning 0)))
+                   (e (copy-marker (match-end 0)))
+                   (token
+                    (pending-make
+                     buffer
+                     :start s
+                     :end e
+                     :label label
+                     :indicator :spinner
+                     :on-cancel
+                     (lambda (p)
+                       (let ((buf (pending-buffer p)))
+                         (when (buffer-live-p buf)
+                           (with-current-buffer buf
+                             (when (fboundp 'gptel-abort)
+                               (gptel-abort buf)))))))))
+              (setcar cell token)
+              token)))))))
+
+(defun ob-gptel--make-callback (uuid buffer format cell)
+  "Return a gptel callback closure for an async block.
+The callback uses the pending token in (car CELL) when active;
+otherwise it falls back to UUID-based search/replace.
+UUID, BUFFER, and FORMAT are the values captured at request time."
+  (lambda (response info)
+    (let ((token (car cell)))
+      (cond
+       ((stringp response)
+        (let ((text (ob-gptel--format-response response format)))
+          (if (and token
+                   (ob-gptel--use-pending-p)
+                   (pending-active-p token))
+              (pending-finish token text)
+            (ob-gptel--legacy-replace uuid buffer text))))
+       ;; gptel signals abort by calling the callback with the
+       ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
+       ;; to clean up via the on-cancel path; do nothing here.
+       ((eq response 'abort) nil)
+       (t
+        (let ((reason (or (and (listp info) (plist-get info :error))
+                          "gptel error")))
+          (if (and token
+                   (ob-gptel--use-pending-p)
+                   (pending-active-p token))
+              (pending-reject token (format "%s" reason))
+            (ob-gptel--legacy-replace
+             uuid buffer
+             (format "(gptel error: %s)" reason)))))))))
+
 (defun org-babel-execute:gptel (body params)
   "Execute a gptel source block with BODY and PARAMS.
 This function sends the BODY text to GPTel and returns the response."
@@ -154,6 +260,12 @@ This function sends the BODY text to GPTel and returns the response."
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (ob-gptel--uuid (concat "<gptel_thinking_" (org-id-uuid) ">"))
+         ;; Shared cell for communicating the pending token between
+         ;; the adoption hook and the gptel callback.
+         (cell (cons nil nil))
+         ;; Captured below inside the `let' that rebinds gptel-model
+         ;; so that presets / params have already taken effect.
+         (resolved-model nil)
          (fsm
           (ob-gptel--with-preset (and preset (intern-soft preset))
 				 (let ((gptel-model
@@ -178,26 +290,12 @@ This function sends the BODY text to GPTel and returns the response."
 						  (setq-local gptel-backend backend)
 						gptel-backend))
 					  gptel-backend)))
+				   (setq resolved-model gptel-model)
 				   (gptel-request
 				    body
 				    :callback
-				    #'(lambda (response _info)
-					(when (stringp response)
-					  (with-current-buffer buffer
-					    (save-excursion
-					      (save-restriction
-						(widen)
-						(goto-char (point-min))
-						(when (search-forward ob-gptel--uuid nil t)
-						  (let* ((match-start (match-beginning 0))
-							 (match-end (match-end 0))
-							 (formatted-response
-							  (if (equal format "org")
-							      (gptel--convert-markdown->org (string-trim response))
-							    (string-trim response))))
-						    (goto-char match-start)
-						    (delete-region match-start match-end)
-						    (insert formatted-response))))))))
+				    (ob-gptel--make-callback
+				     ob-gptel--uuid buffer format cell)
 				    :buffer (current-buffer)
 				    :transforms (list #'gptel--transform-apply-preset
 						      (ob-gptel--add-context context))
@@ -216,6 +314,22 @@ This function sends the BODY text to GPTel and returns the response."
          (gptel-fsm-info)
          (plist-get :data)
          (pp-to-string))
+      ;; When `pending' is loaded, schedule a one-shot, buffer-local
+      ;; hook to adopt the inserted UUID region as a placeholder once
+      ;; org-babel has finished writing the result.
+      (when (ob-gptel--use-pending-p)
+        (let* ((uuid ob-gptel--uuid)
+               (label (format "gptel: %s" (or resolved-model "gptel")))
+               (adopt-cell cell)
+               (target-buffer buffer)
+               adopt-fn)
+          (setq adopt-fn
+                (lambda ()
+                  (remove-hook 'org-babel-after-execute-hook adopt-fn t)
+                  (ob-gptel--adopt-pending
+                   uuid target-buffer label adopt-cell)))
+          (with-current-buffer buffer
+            (add-hook 'org-babel-after-execute-hook adopt-fn nil t))))
       ob-gptel--uuid)))
 
 (defun org-babel-prep-session:gptel (session _params)
