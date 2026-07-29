@@ -203,20 +203,15 @@ The result is trimmed; returns nil when the region is empty."
   "Return non-nil when the `pending' library is loadable."
   (featurep 'pending))
 
-(defun ob-gptel--legacy-replace (uuid buffer text)
+(defun ob-gptel--legacy-replace (buffer text block-marker result-params)
   "In BUFFER, find UUID and atomically replace it with TEXT."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (save-excursion
         (save-restriction
           (widen)
-          (goto-char (point-min))
-          (when (search-forward uuid nil t)
-            (let ((s (match-beginning 0))
-                  (e (match-end 0)))
-              (goto-char s)
-              (delete-region s e)
-              (insert text))))))))
+          (goto-char (block-marker))
+          (org-babel-insert-result  text result-params))))))
 
 (defun ob-gptel--format-response (response format)
   "Trim RESPONSE and convert markdown->org if FORMAT equals \"org\"."
@@ -257,11 +252,12 @@ found."
               (setcar cell token)
               token)))))))
 
-(defun ob-gptel--make-callback (uuid buffer format cell)
+(defun ob-gptel--make-callback (buffer format cell block-marker result-params)
   "Return a gptel callback closure for an async block.
 The callback uses the pending token in (car CELL) when active;
 otherwise it falls back to UUID-based search/replace.
-UUID, BUFFER, and FORMAT are the values captured at request time."
+BUFFER, FORMAT, BLOCK-START and RESULT-PARAMS are the values captured at request
+time."
   (lambda (response info)
     (let ((token (car cell)))
       (cond
@@ -271,7 +267,7 @@ UUID, BUFFER, and FORMAT are the values captured at request time."
                    (ob-gptel--use-pending-p)
                    (pending-active-p token))
               (pending-finish token text)
-            (ob-gptel--legacy-replace uuid buffer text))))
+            (ob-gptel--legacy-replace buffer text block-marker result-params))))
        ;; gptel signals abort by calling the callback with the
        ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
        ;; to clean up via the on-cancel path; do nothing here.
@@ -284,8 +280,8 @@ UUID, BUFFER, and FORMAT are the values captured at request time."
                    (pending-active-p token))
               (pending-reject token (format "%s" reason))
             (ob-gptel--legacy-replace
-             uuid buffer
-             (format "(gptel error: %s)" reason)))))))))
+             buffer
+             (format "(gptel error: %s)" reason) block-marker result-params))))))))
 
 (defun org-babel-execute:gptel (body params)
   "Execute a gptel source block with BODY and PARAMS.
@@ -302,6 +298,10 @@ This function sends the BODY text to GPTel and returns the response."
          (format (cdr (assoc :format params)))
          (dry-run (cdr (assoc :dry-run params)))
          (entry (cdr (assoc :entry params)))
+         (result-params (cdr (assoc :result-params params)))
+         (block-marker (copy-marker (save-excursion
+                                      (org-babel-where-is-src-block-head))
+                                    t))
          (buffer (current-buffer))
          (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (entry (and entry (not (member entry '("no" "nil" "false")))))
@@ -349,7 +349,7 @@ This function sends the BODY text to GPTel and returns the response."
 				    effective-body
 				    :callback
 				    (ob-gptel--make-callback
-				     ob-gptel--uuid buffer format cell)
+				      buffer format cell block-marker result-params)
 				    :buffer (current-buffer)
 				    :transforms (list #'gptel--transform-apply-preset
 						      (ob-gptel--add-context context))
