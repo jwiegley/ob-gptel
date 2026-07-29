@@ -266,7 +266,7 @@ time."
           (if (and token
                    (ob-gptel--use-pending-p)
                    (pending-active-p token))
-              (pending-finish token text)
+              (pending-finish token (lambda () (ob-gptel--legacy-replace buffer text block-start result-params)))
             (ob-gptel--legacy-replace buffer text block-start result-params))))
        ;; gptel signals abort by calling the callback with the
        ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
