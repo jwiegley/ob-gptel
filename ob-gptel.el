@@ -321,47 +321,47 @@ This function sends the BODY text to GPTel and returns the response."
          (resolved-model nil)
          (fsm
           (ob-gptel--with-preset (and preset (intern-soft preset))
-				 (let ((gptel-model
-					(if model
-					    (if (symbolp model) model (intern model))
-					  gptel-model))
-				       (gptel-temperature
-					(if (and temperature (stringp temperature))
-					    (string-to-number temperature)
-					  gptel-temperature))
-				       (gptel-max-tokens
-					(if (and max-tokens (stringp max-tokens))
-					    (string-to-number max-tokens)
-					  gptel-max-tokens))
-				       (gptel--system-message
-					(or system-message
-					    gptel--system-message))
-				       (gptel-backend
-					(if backend-name
-					    (let ((backend (gptel-get-backend backend-name)))
-					      (if backend
-						  (setq-local gptel-backend backend)
-						gptel-backend))
-					  gptel-backend)))
-				   (setq resolved-model gptel-model)
-				   (gptel-request
-				    effective-body
-				    :callback
-				    (ob-gptel--make-callback
-				      buffer format cell block-start result-params)
-				    :buffer (current-buffer)
-				    :transforms (list #'gptel--transform-apply-preset
-						      (ob-gptel--add-context context))
-				    :system
-				    (cond (prompt
-					   (with-current-buffer buffer
-					     (ob-gptel-find-prompt prompt system-message)))
-					  (session
-					   (goto-char block-start)
-					   (with-current-buffer buffer
-					     (ob-gptel-find-session session system-message))))
-				    :dry-run dry-run
-				    :stream nil)))))
+            (let ((gptel-model
+                   (if model
+                       (if (symbolp model) model (intern model))
+                     gptel-model))
+                  (gptel-temperature
+                   (if (and temperature (stringp temperature))
+                       (string-to-number temperature)
+                     gptel-temperature))
+                  (gptel-max-tokens
+                   (if (and max-tokens (stringp max-tokens))
+                       (string-to-number max-tokens)
+                     gptel-max-tokens))
+                  (gptel--system-message
+                   (or system-message
+                       gptel--system-message))
+                  (gptel-backend
+                   (if backend-name
+                       (let ((backend (gptel-get-backend backend-name)))
+                         (if backend
+                             (setq-local gptel-backend backend)
+                           gptel-backend))
+                     gptel-backend)))
+              (setq resolved-model gptel-model)
+              (gptel-request
+                  effective-body
+                :callback
+                (ob-gptel--make-callback buffer format cell
+                                         block-start result-params)
+                :buffer (current-buffer)
+                :transforms (list #'gptel--transform-apply-preset
+                                  (ob-gptel--add-context context))
+                :system
+                (cond (prompt
+                       (with-current-buffer buffer
+                         (ob-gptel-find-prompt prompt system-message)))
+                      (session
+                       (goto-char block-start)
+                       (with-current-buffer buffer
+                         (ob-gptel-find-session session system-message))))
+                :dry-run dry-run
+                :stream nil)))))
     (if dry-run
         (thread-first
          fsm
