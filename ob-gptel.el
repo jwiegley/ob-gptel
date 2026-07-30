@@ -358,7 +358,8 @@ This function sends the BODY text to GPTel and returns the response."
                              (if (stringp tools-param)
                                  (split-string tools-param)
                                tools-param)))))
-              (setq resolved-model gptel-model)              (gptel-request
+              (setq resolved-model gptel-model)
+              (gptel-request
                   effective-body
                 :callback
                 (ob-gptel--make-callback
