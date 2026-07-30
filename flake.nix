@@ -65,12 +65,12 @@
                 (require (quote undercover))
                 (setq undercover-force-coverage t)
                 (undercover "ob-gptel.el"
-                  (:send-report nil)))' \
+                  (:send-report nil)
+                  (:report-format (quote lcov))
+                  (:report-file "coverage.lcov")))' \
               -l ob-gptel-test.el \
-              -f ert-run-tests-batch-and-exit 2>&1 || true
-            if [ -f coverage.lcov ]; then
-              cp coverage.lcov $out/
-            fi
+              -f ert-run-tests-batch-and-exit 2>&1
+            cp coverage.lcov $out/
           '';
 
           # Generate a benchmark report
@@ -128,9 +128,8 @@
         # the file is unchanged afterward.
         indent-check = mkCheck system "indent-check" ''
           cp ob-gptel.el ob-gptel.el.orig
-          emacs --batch ob-gptel.el \
+          emacs --batch -L . -l ob-gptel.el ob-gptel.el \
             --eval '(progn
-              (require (quote cl-lib))
               (emacs-lisp-mode)
               (setq indent-tabs-mode nil)
               (indent-region (point-min) (point-max))
@@ -167,10 +166,26 @@
               (require (quote undercover))
               (setq undercover-force-coverage t)
               (undercover "ob-gptel.el"
-                (:send-report nil)))' \
+                (:send-report nil)
+                (:report-format (quote lcov))
+                (:report-file "coverage.lcov")))' \
             -l ob-gptel-test.el \
             -f ert-run-tests-batch-and-exit
-          echo "Coverage check passed (tests ran with instrumentation)."
+          test -s coverage.lcov
+          coverage=$(awk -F: '
+            /^DA:/ {
+              split($2, line, ",")
+              total++
+              if (line[2] > 0) hit++
+            }
+            END { if (total == 0) exit 1; print int(100 * hit / total) }
+          ' coverage.lcov)
+          baseline=$(cat .coverage-baseline)
+          if [ "$coverage" -lt "$baseline" ]; then
+            echo "Coverage $coverage% is below baseline $baseline%"
+            exit 1
+          fi
+          echo "Coverage check passed: $coverage% (baseline: $baseline%)."
         '';
 
         # Benchmark sanity check -- ensure benchmarks complete
@@ -195,7 +210,7 @@
                 esac
                 echo "Formatting $f"
                 env -i HOME="$(mktemp -d)" \
-                  ${emacsCI system}/bin/emacs --batch "$f" \
+                  ${emacsCI system}/bin/emacs --batch -L . -l ob-gptel.el "$f" \
                   --eval '(progn
                     (require (quote cl-lib))
                     (emacs-lisp-mode)

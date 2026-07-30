@@ -15,7 +15,9 @@
 ;; loading ob-gptel so that it can instrument the file).
 (when (require 'undercover nil t)
   (undercover "ob-gptel.el"
-              (:send-report nil)))
+              (:send-report nil)
+              (:report-format 'lcov)
+              (:report-file "coverage.lcov")))
 
 (require 'ert)
 (require 'ob-gptel)
@@ -227,19 +229,21 @@
              (lambda (_f &optional _) nil)))
     (should-not (ob-gptel--use-pending-p))))
 
-(ert-deftest ob-gptel-test-legacy-replace-replaces-uuid ()
-  "`ob-gptel--legacy-replace' substitutes the UUID with the response."
+(ert-deftest ob-gptel-test-legacy-replace-inserts-result ()
+  "`ob-gptel--legacy-replace' replaces the block result."
   (with-temp-buffer
-    (insert "before <gptel-uuid> after")
-    (ob-gptel--legacy-replace "<gptel-uuid>" (current-buffer) "RESULT")
-    (should (equal (buffer-string) "before RESULT after"))))
+    (org-mode)
+    (insert "#+begin_src gptel\nQuestion\n#+end_src\n\n#+RESULTS:\n: OLD\n")
+    (ob-gptel--legacy-replace
+     (current-buffer) "RESULT" (point-min) '("replace"))
+    (should (equal (buffer-string)
+                   "#+begin_src gptel\nQuestion\n#+end_src\n\n#+RESULTS:\n: RESULT\n"))))
 
-(ert-deftest ob-gptel-test-legacy-replace-noop-when-missing ()
-  "`ob-gptel--legacy-replace' is a no-op when UUID is absent."
-  (with-temp-buffer
-    (insert "no marker here")
-    (ob-gptel--legacy-replace "<gptel-uuid>" (current-buffer) "RESULT")
-    (should (equal (buffer-string) "no marker here"))))
+(ert-deftest ob-gptel-test-legacy-replace-noop-for-dead-buffer ()
+  "`ob-gptel--legacy-replace' is a no-op for a dead buffer."
+  (let ((buffer (generate-new-buffer " *ob-gptel-dead*")))
+    (kill-buffer buffer)
+    (should-not (ob-gptel--legacy-replace buffer "RESULT" 1 '("replace")))))
 
 (ert-deftest ob-gptel-test-format-response-trims ()
   "`ob-gptel--format-response' trims whitespace."
@@ -248,15 +252,17 @@
     (should (equal (ob-gptel--format-response "  hi  " "markdown") "hi"))
     (should (equal (ob-gptel--format-response "  hi  " "org") "ORG:hi"))))
 
-(ert-deftest ob-gptel-test-make-callback-uses-legacy-when-no-token ()
-  "Callback falls back to UUID search/replace when no pending token."
+(ert-deftest ob-gptel-test-make-callback-inserts-result-without-token ()
+  "Callback inserts an Org result when no pending token exists."
   (with-temp-buffer
-    (insert "X<gptel-uuid>X")
+    (org-mode)
+    (insert "#+begin_src gptel\nQuestion\n#+end_src\n\n#+RESULTS:\n: OLD\n")
     (let* ((cell (cons nil nil))
-           (cb (ob-gptel--make-callback "<gptel-uuid>"
-                                        (current-buffer) "markdown" cell)))
+           (cb (ob-gptel--make-callback
+                (current-buffer) "markdown" cell (point-min) '("replace"))))
       (funcall cb "RESULT" nil)
-      (should (equal (buffer-string) "XRESULTX")))))
+      (should (equal (buffer-string)
+                     "#+begin_src gptel\nQuestion\n#+end_src\n\n#+RESULTS:\n: RESULT\n")))))
 
 (ert-deftest ob-gptel-test-make-callback-prefers-pending-when-active ()
   "Callback calls `pending-finish' when token is active."
@@ -272,8 +278,8 @@
               ((symbol-function 'pending-finish)
                (lambda (tok text) (setq finish-args (list tok text)) t)))
       (with-temp-buffer
-        (let ((cb (ob-gptel--make-callback "<gptel-uuid>"
-                                           (current-buffer) "markdown" cell)))
+        (let ((cb (ob-gptel--make-callback
+                   (current-buffer) "markdown" cell (point-min) nil)))
           (funcall cb "  hello  " nil)))
       (should (equal finish-args '(fake-token "hello"))))))
 
@@ -291,8 +297,8 @@
                (lambda (tok reason &optional _)
                  (setq reject-args (list tok reason)) t)))
       (with-temp-buffer
-        (let ((cb (ob-gptel--make-callback "<gptel-uuid>"
-                                           (current-buffer) "markdown" cell)))
+        (let ((cb (ob-gptel--make-callback
+                   (current-buffer) "markdown" cell (point-min) nil)))
           (funcall cb nil '(:error "boom")))
         (should (equal (car reject-args) 'fake-token))
         (should (string-match-p "boom" (cadr reject-args)))))))
@@ -300,12 +306,12 @@
 (ert-deftest ob-gptel-test-make-callback-abort-is-noop ()
   "Callback does not touch the buffer when response is symbol `abort'."
   (with-temp-buffer
-    (insert "X<gptel-uuid>X")
+    (insert "unchanged")
     (let* ((cell (cons nil nil))
-           (cb (ob-gptel--make-callback "<gptel-uuid>"
-                                        (current-buffer) "markdown" cell)))
+           (cb (ob-gptel--make-callback
+                (current-buffer) "markdown" cell (point-min) nil)))
       (funcall cb 'abort nil)
-      (should (equal (buffer-string) "X<gptel-uuid>X")))))
+      (should (equal (buffer-string) "unchanged")))))
 
 (ert-deftest ob-gptel-test-adopt-pending-noop-without-feature ()
   "`ob-gptel--adopt-pending' is a no-op when pending is not loaded."

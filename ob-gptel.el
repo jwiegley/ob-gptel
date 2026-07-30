@@ -89,36 +89,36 @@ and the result in the ASSISTANT role."
 (defun ob-gptel--all-source-blocks (session)
   "Return all Source blocks before point with `:session' set to SESSION."
   (org-element-map
-   (save-restriction
-     (narrow-to-region (point-min) (point))
-     (org-element-parse-buffer))
-   '(src-block fixed-width)
-   (lambda (element)
-     (cond ((eq (org-element-type element) 'src-block)
-            (let ((start
-                   (org-element-property :begin element))
-                  (language
-                   (when (org-element-property :language element)
-                     (string-trim (org-element-property :language element))))
-                  (parameters
-                   (when (org-element-property :parameters element)
-                     (org-babel-parse-header-arguments
-                      (string-trim (org-element-property :parameters element))))))
-              (and (<= start (point))
-                   (equal session (cdr (assq :session parameters)))
-                   (list :start start
-                         :language language
-                         :parameters parameters
-                         :body
-                         (when (org-element-property :value element)
-                           (string-trim (org-element-property :value element)))
-                         :result
-                         (save-excursion
-                           (save-restriction
-                             (goto-char (org-element-property :begin element))
-                             (when (org-babel-where-is-src-block-result)
-                               (goto-char (org-babel-where-is-src-block-result))
-                               (org-babel-read-result))))))))))))
+      (save-restriction
+        (narrow-to-region (point-min) (point))
+        (org-element-parse-buffer))
+      '(src-block fixed-width)
+    (lambda (element)
+      (cond ((eq (org-element-type element) 'src-block)
+             (let ((start
+                    (org-element-property :begin element))
+                   (language
+                    (when (org-element-property :language element)
+                      (string-trim (org-element-property :language element))))
+                   (parameters
+                    (when (org-element-property :parameters element)
+                      (org-babel-parse-header-arguments
+                       (string-trim (org-element-property :parameters element))))))
+               (and (<= start (point))
+                    (equal session (cdr (assq :session parameters)))
+                    (list :start start
+                          :language language
+                          :parameters parameters
+                          :body
+                          (when (org-element-property :value element)
+                            (string-trim (org-element-property :value element)))
+                          :result
+                          (save-excursion
+                            (save-restriction
+                              (goto-char (org-element-property :begin element))
+                              (when (org-babel-where-is-src-block-result)
+                                (goto-char (org-babel-where-is-src-block-result))
+                                (org-babel-read-result))))))))))))
 
 (defun ob-gptel-find-session (session &optional system-message)
   "Given a SESSION identifier, find the blocks/result pairs it names.
@@ -320,54 +320,55 @@ This function sends the BODY text to GPTel and returns the response."
          ;; so that presets / params have already taken effect.
          (resolved-model nil)
          (fsm
-          (ob-gptel--with-preset (and preset (intern-soft preset))
-				 (let ((gptel-model
-					(if model
-					    (if (symbolp model) model (intern model))
-					  gptel-model))
-				       (gptel-temperature
-					(if (and temperature (stringp temperature))
-					    (string-to-number temperature)
-					  gptel-temperature))
-				       (gptel-max-tokens
-					(if (and max-tokens (stringp max-tokens))
-					    (string-to-number max-tokens)
-					  gptel-max-tokens))
-				       (gptel--system-message
-					(or system-message
-					    gptel--system-message))
-				       (gptel-backend
-					(if backend-name
-					    (let ((backend (gptel-get-backend backend-name)))
-					      (if backend
-						  (setq-local gptel-backend backend)
-						gptel-backend))
-					  gptel-backend)))
-				   (setq resolved-model gptel-model)
-				   (gptel-request
-				    effective-body
-				    :callback
-				    (ob-gptel--make-callback
-				      buffer format cell block-start result-params)
-                                    :buffer (current-buffer)
-				    :transforms (list #'gptel--transform-apply-preset
-						      (ob-gptel--add-context context))
-				    :system
-				    (cond (prompt
-					   (with-current-buffer buffer
-					     (ob-gptel-find-prompt prompt system-message)))
-					  (session
-					   (goto-char block-start)
-					   (with-current-buffer buffer
-					     (ob-gptel-find-session session system-message))))
-				    :dry-run dry-run
-				    :stream nil)))))
+          (ob-gptel--with-preset
+              (and preset (intern-soft preset))
+            (let ((gptel-model
+                   (if model
+                       (if (symbolp model) model (intern model))
+                     gptel-model))
+                  (gptel-temperature
+                   (if (and temperature (stringp temperature))
+                       (string-to-number temperature)
+                     gptel-temperature))
+                  (gptel-max-tokens
+                   (if (and max-tokens (stringp max-tokens))
+                       (string-to-number max-tokens)
+                     gptel-max-tokens))
+                  (gptel--system-message
+                   (or system-message
+                       gptel--system-message))
+                  (gptel-backend
+                   (if backend-name
+                       (let ((backend (gptel-get-backend backend-name)))
+                         (if backend
+                             (setq-local gptel-backend backend)
+                           gptel-backend))
+                     gptel-backend)))
+              (setq resolved-model gptel-model)
+              (gptel-request
+                  effective-body
+                :callback
+                (ob-gptel--make-callback
+                 buffer format cell block-start result-params)
+                :buffer (current-buffer)
+                :transforms (list #'gptel--transform-apply-preset
+                                  (ob-gptel--add-context context))
+                :system
+                (cond (prompt
+                       (with-current-buffer buffer
+                         (ob-gptel-find-prompt prompt system-message)))
+                      (session
+                       (goto-char block-start)
+                       (with-current-buffer buffer
+                         (ob-gptel-find-session session system-message))))
+                :dry-run dry-run
+                :stream nil)))))
     (if dry-run
         (thread-first
-         fsm
-         (gptel-fsm-info)
-         (plist-get :data)
-         (pp-to-string))
+          fsm
+          (gptel-fsm-info)
+          (plist-get :data)
+          (pp-to-string))
       ;; When `pending' is loaded, schedule a one-shot, buffer-local
       ;; hook to adopt the inserted UUID region as a placeholder once
       ;; org-babel has finished writing the result.
@@ -445,8 +446,8 @@ GPTel blocks don't use sessions, so this is a no-op."
                                 (lambda (m) (get (intern m) :description))))
                          ("preset" (cons gptel--known-presets
                                          (lambda (p) (thread-first
-                                                      (cdr (assq (intern p) gptel--known-presets))
-                                                      (plist-get :description)))))
+                                                       (cdr (assq (intern p) gptel--known-presets))
+                                                       (plist-get :description)))))
                          ("dry-run" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
                          ("entry" (cons (list "t" "nil") (lambda (_) "" "Boolean")))
                          ("format" (cons (list "markdown" "org") (lambda (_) "" "Output format"))))))
