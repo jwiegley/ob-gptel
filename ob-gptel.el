@@ -211,7 +211,7 @@ The result is trimmed; returns nil when the region is empty."
         (save-restriction
           (widen)
           (goto-char block-start)
-          (org-babel-insert-result  text result-params))))))
+          (org-babel-insert-result text result-params))))))
 
 (defun ob-gptel--format-response (response format)
   "Trim RESPONSE and convert markdown->org if FORMAT equals \"org\"."
@@ -349,7 +349,7 @@ This function sends the BODY text to GPTel and returns the response."
 				    :callback
 				    (ob-gptel--make-callback
 				      buffer format cell block-start result-params)
-				    :buffer (current-buffer)
+                                    :buffer (current-buffer)
 				    :transforms (list #'gptel--transform-apply-preset
 						      (ob-gptel--add-context context))
 				    :system
