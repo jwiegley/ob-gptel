@@ -23,7 +23,8 @@
 ;; turn), :session (id linking earlier blocks as prior turns), :format
 ;; (\"org\" or \"markdown\"), :dry-run (inspect payload), and :entry
 ;; (when t, prepend the prose preceding the block in its enclosing org
-;; entry to the body — handy for \"summarize the above\" style queries).;; Tool use example:
+;; entry to the body — handy for \"summarize the above\" style queries).
+;; Tool use example:
 ;;   #+begin_src gptel :tools "search_web read_url"
 ;;   What are the latest Emacs features?
 ;;   #+end_src
