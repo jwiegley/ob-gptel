@@ -275,7 +275,9 @@ time."
        ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
        ;; to clean up via the on-cancel path; do nothing here.
        ((eq response 'abort) nil)
-       (t
+       ;; gptel returns a nil response when the response is empty
+       ;; or there is an error.
+       ((eq response nil)
         (let ((reason (or (and (listp info) (plist-get info :error))
                           "gptel error")))
           (if (and token
