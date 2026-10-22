@@ -265,9 +265,11 @@
                      "#+begin_src gptel\nQuestion\n#+end_src\n\n#+RESULTS:\n: RESULT\n")))))
 
 (ert-deftest ob-gptel-test-make-callback-prefers-pending-when-active ()
-  "Callback calls `pending-finish' when token is active."
+  "Callback calls `pending-finish' with a function that invokes
+`ob-gptel--legacy-replace' on the trimmed response."
   (let* ((cell (cons 'fake-token nil))
          (finish-args nil)
+         (replace-args nil)
          ;; Stub featurep so the predicate sees pending as loaded.
          (orig-featurep (symbol-function 'featurep)))
     (cl-letf (((symbol-function 'featurep)
@@ -276,12 +278,24 @@
               ((symbol-function 'pending-active-p)
                (lambda (tok) (eq tok 'fake-token)))
               ((symbol-function 'pending-finish)
-               (lambda (tok text) (setq finish-args (list tok text)) t)))
+               (lambda (tok fn) (setq finish-args (list tok fn)) t))
+              ((symbol-function 'ob-gptel--legacy-replace)
+               (lambda (buffer text block-start result-params)
+                 (setq replace-args
+                       (list buffer text block-start result-params)))))
       (with-temp-buffer
         (let ((cb (ob-gptel--make-callback
                    (current-buffer) "markdown" cell (point-min) nil)))
           (funcall cb "  hello  " nil)))
-      (should (equal finish-args '(fake-token "hello"))))))
+      ;; pending-finish should have been called with token + a function.
+      (should (= (length finish-args) 2))
+      (should (eq (car finish-args) 'fake-token))
+      (should (functionp (cadr finish-args)))
+      ;; Invoking that function should call ob-gptel--legacy-replace
+      ;; with the trimmed text.
+      (funcall (cadr finish-args))
+      (should (= (length replace-args) 4))
+      (should (string= (cadr replace-args) "hello")))))
 
 (ert-deftest ob-gptel-test-make-callback-rejects-on-error ()
   "Callback calls `pending-reject' when response is not a string."
