@@ -207,7 +207,8 @@ The result is trimmed; returns nil when the region is empty."
   (featurep 'pending))
 
 (defun ob-gptel--legacy-replace (buffer text block-start result-params)
-  "In BUFFER, find UUID and atomically replace it with TEXT."
+  "In BUFFER, insert TEXT at BLOCK-START as an Org Babel result
+   using RESULT-PARAMS."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (save-excursion
