@@ -207,7 +207,8 @@ The result is trimmed; returns nil when the region is empty."
   (featurep 'pending))
 
 (defun ob-gptel--legacy-replace (buffer text block-start result-params)
-  "In BUFFER, find UUID and atomically replace it with TEXT."
+  "In BUFFER, insert TEXT at BLOCK-START as an Org Babel result
+   using RESULT-PARAMS."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (save-excursion
@@ -269,7 +270,7 @@ time."
           (if (and token
                    (ob-gptel--use-pending-p)
                    (pending-active-p token))
-              (pending-finish token text)
+              (pending-finish token (lambda () (ob-gptel--legacy-replace buffer text block-start result-params)))
             (ob-gptel--legacy-replace buffer text block-start result-params))))
        ;; gptel signals abort by calling the callback with the
        ;; symbol `abort'.  Leave the placeholder for `gptel-abort'
@@ -358,7 +359,8 @@ This function sends the BODY text to GPTel and returns the response."
                              (if (stringp tools-param)
                                  (split-string tools-param)
                                tools-param)))))
-              (setq resolved-model gptel-model)              (gptel-request
+              (setq resolved-model gptel-model)
+              (gptel-request
                   effective-body
                 :callback
                 (ob-gptel--make-callback
