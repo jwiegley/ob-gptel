@@ -123,6 +123,19 @@ and the result in the ASSISTANT role."
                                 (goto-char (org-babel-where-is-src-block-result))
                                 (org-babel-read-result))))))))))))
 
+(defun ob-gptel-find-session-param (param params session)
+  "Look for PARAM in PARAMS and return it if found.
+Otherwise look for the latest defined PARAM in the blocks in SESSION. Return nil
+if not found."
+  (let ((override (cdr (assoc param params)))
+        (found-param nil)
+        (blocks (ob-gptel--all-source-blocks session)))
+    (if override override
+      (dolist (block blocks)
+        (when-let* ((val (cdr (assoc param (plist-get block :parameters)))))
+          (setq found-param val)))
+      found-param)))
+
 (defun ob-gptel-find-session (session &optional system-message)
   "Given a SESSION identifier, find the blocks/result pairs it names.
 The result is a directive in the format of `gptel-directives', which
@@ -292,25 +305,25 @@ time."
 (defun org-babel-execute:gptel (body params)
   "Execute a gptel source block with BODY and PARAMS.
 This function sends the BODY text to GPTel and returns the response."
-  (let* ((model (cdr (assoc :model params)))
-         (temperature (cdr (assoc :temperature params)))
-         (max-tokens (cdr (assoc :max-tokens params)))
-         (system-message (cdr (assoc :system params)))
-         (backend-name (cdr (assoc :backend params)))
-         (prompt (cdr (assoc :prompt params)))
-         (session (cdr (assoc :session params)))
-         (preset (cdr (assoc :preset params)))
-         (context (cdr (assoc :context params)))
-         (format (cdr (assoc :format params)))
+  (let* ((buffer (current-buffer))
          (dry-run (cdr (assoc :dry-run params)))
+         (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
          (entry (cdr (assoc :entry params)))
+         (entry (and entry (not (member entry '("no" "nil" "false")))))
          (result-params (cdr (assoc :result-params params)))
          (block-start (copy-marker (nth 5 (org-babel-get-src-block-info 'light))
                                    t))
          (tools-param (cdr (assoc :tools params)))
-         (buffer (current-buffer))
-         (dry-run (and dry-run (not (member dry-run '("no" "nil" "false")))))
-         (entry (and entry (not (member entry '("no" "nil" "false")))))
+         (session (cdr (assoc :session params)))
+         (prompt (cdr (assoc :prompt params)))
+         (model (ob-gptel-find-session-param :model params session))
+         (temperature (ob-gptel-find-session-param :temperature params session))
+         (max-tokens (ob-gptel-find-session-param :max-tokens params session))
+         (backend-name (ob-gptel-find-session-param :backend params session))
+         (system-message (ob-gptel-find-session-param :system params session))
+         (preset (ob-gptel-find-session-param :preset params session))
+         (context (ob-gptel-find-session-param :context params session))
+         (format (ob-gptel-find-session-param :format params session))
          (effective-body
           (if entry
               (let ((prefix
@@ -334,12 +347,16 @@ This function sends the BODY text to GPTel and returns the response."
                        (if (symbolp model) model (intern model))
                      gptel-model))
                   (gptel-temperature
-                   (if (and temperature (stringp temperature))
-                       (string-to-number temperature)
+                   (if temperature
+                       (if (stringp temperature)
+                           (string-to-number temperature)
+                         temperature)
                      gptel-temperature))
                   (gptel-max-tokens
-                   (if (and max-tokens (stringp max-tokens))
-                       (string-to-number max-tokens)
+                   (if max-tokens
+                       (if (stringp max-tokens)
+                           (string-to-number max-tokens)
+                         max-tokens)
                      gptel-max-tokens))
                   (gptel--system-message
                    (or system-message
