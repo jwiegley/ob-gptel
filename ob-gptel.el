@@ -347,12 +347,16 @@ This function sends the BODY text to GPTel and returns the response."
                        (if (symbolp model) model (intern model))
                      gptel-model))
                   (gptel-temperature
-                   (if (and temperature (stringp temperature))
-                       (string-to-number temperature)
+                   (if temperature
+                       (if (stringp temperature)
+                           (string-to-number temperature)
+                         temperature)
                      gptel-temperature))
                   (gptel-max-tokens
-                   (if (and max-tokens (stringp max-tokens))
-                       (string-to-number max-tokens)
+                   (if max-tokens
+                       (if (stringp max-tokens)
+                           (string-to-number max-tokens)
+                         max-tokens)
                      gptel-max-tokens))
                   (gptel--system-message
                    (or system-message
